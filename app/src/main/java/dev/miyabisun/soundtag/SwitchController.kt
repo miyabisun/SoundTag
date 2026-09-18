@@ -16,7 +16,9 @@ data class BluetoothSnapshot(
     val active get() = audioConnected + linked + transitioning
 }
 
-interface BluetoothAccess {
+interface BluetoothAccess : AutoCloseable {
+    fun start() {}
+    override fun close() {}
     fun snapshot(): BluetoothSnapshot
     fun connect(address: String): Boolean
     fun disconnect(address: String): Boolean
@@ -40,6 +42,7 @@ class SwitchController(private val access: BluetoothAccess) {
     private var closed = false
     private var cancelling: String? = null
     private var cancellationSawLink = false
+    val hasPendingWork get() = status.phase == SwitchPhase.WORKING || cancelling != null
 
     fun submit(command: TagCommand, nowMs: Long): SwitchFailure? {
         if (closed) {
@@ -147,11 +150,15 @@ class SwitchController(private val access: BluetoothAccess) {
         }
     }
 
+    fun cancel() {
+        if (closed || status.phase != SwitchPhase.WORKING) return
+        try { cancelFlight(access.snapshot()) } catch (_: RuntimeException) { /* Permission may be revoked. */ }
+        fail(SwitchFailure.CLOSED)
+    }
+
     fun close() {
         if (closed) return
-        try { cancelFlight(access.snapshot()) } catch (_: RuntimeException) { /* Permission may be revoked. */ }
-        flight = null
+        cancel()
         closed = true
-        if (status.phase == SwitchPhase.WORKING) fail(SwitchFailure.CLOSED)
     }
 }

@@ -233,6 +233,23 @@ class SwitchControllerTest {
         control.submit(TagCommand.Connect(b), SwitchController.TIMEOUT_MS + 20)
         assertEquals(listOf("connect:$a", "disconnect:$a", "connect:$b"), fake.calls)
     }
+
+    @Test fun cancellingKeepsPendingWorkUntilTheNativeDisconnectIsConfirmed() {
+        val fake = FakeBluetooth(a, b, watch)
+        val control = SwitchController(fake)
+        control.submit(TagCommand.Connect(a), 0)
+        control.cancel()
+        assertTrue(control.hasPendingWork)
+        assertEquals(SwitchFailure.CLOSED, control.status.failure)
+        control.submit(TagCommand.Connect(b), 10)
+        assertEquals(listOf("connect:$a", "disconnect:$a"), fake.calls)
+        fake.disconnected(a)
+        control.changed(20)
+        fake.connected(b)
+        control.changed(30)
+        assertFalse(control.hasPendingWork)
+        assertEquals(SwitchPhase.SUCCEEDED, control.status.phase)
+    }
 }
 
 private class FakeBluetooth(a: String, b: String, watch: String) : BluetoothAccess {

@@ -49,7 +49,7 @@ class AndroidBluetooth(
         }
     }
 
-    fun start() {
+    override fun start() {
         if (registered || closed) return
         val filter = IntentFilter().apply {
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)

@@ -10,11 +10,12 @@ import android.companion.BluetoothDeviceFilter
 import android.companion.CompanionDeviceManager
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.IntentSender
 import android.content.pm.PackageManager
 import java.util.Locale
 
-class AndroidSettings(private val activity: Activity) : SettingsAccess {
+class AndroidSettings(private val activity: Context) : SettingsAccess {
     private val adapter get() = activity.getSystemService(BluetoothManager::class.java)?.adapter
     private val companion get() = activity.getSystemService(CompanionDeviceManager::class.java)
     private val preferences = activity.getSharedPreferences("soundtag", Activity.MODE_PRIVATE)
@@ -37,6 +38,7 @@ class AndroidSettings(private val activity: Activity) : SettingsAccess {
         check(preferences.edit().putStringSet("allowed", addresses).commit()) { "設定を保存できません" }
     }
     override fun associate(address: String, complete: (Boolean) -> Unit) {
+        val screen = activity as? Activity ?: return complete(false)
         val manager = companion ?: return complete(false)
         val request = AssociationRequest.Builder()
             .addDeviceFilter(BluetoothDeviceFilter.Builder().setAddress(address).build())
@@ -45,7 +47,7 @@ class AndroidSettings(private val activity: Activity) : SettingsAccess {
             manager.associate(request, activity.mainExecutor, object : CompanionDeviceManager.Callback() {
                 override fun onAssociationPending(intentSender: IntentSender) {
                     try {
-                        activity.startIntentSenderForResult(intentSender, 2, null, 0, 0, 0)
+                        screen.startIntentSenderForResult(intentSender, 2, null, 0, 0, 0)
                     } catch (_: IntentSender.SendIntentException) {
                         complete(false)
                     }
