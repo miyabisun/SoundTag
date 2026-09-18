@@ -73,7 +73,7 @@ class SettingsTest {
         assertEquals(SettingsResult.UNKNOWN_DEVICE, settings.setAllowedNow("00:00:00:00:00:00", true))
     }
 
-    @Test fun copyOnlyUsesCurrentAuthorizationAndPermissionRevocationCancelsConsent() {
+    @Test fun codesUseCurrentAuthorizationAndPermissionRevocationCancelsConsent() {
         val fake = FakeSettings(a, b)
         val settings = SettingsController(fake)
         settings.setAllowed(a, true) {}
@@ -82,10 +82,9 @@ class SettingsTest {
         assertTrue(fake.saved.isEmpty())
         fake.permission = true
         settings.setAllowed(a, true) {}
-        assertTrue(settings.copy(TagCommand.Disconnect(a)))
-        assertEquals("soundtag://disconnect/$a", fake.copied)
+        assertEquals("soundtag://disconnect/$a", settings.code(TagCommand.Disconnect(a)))
         settings.setAllowed(a, false) {}
-        assertFalse(settings.copy(TagCommand.Disconnect(a)))
+        assertNull(settings.code(TagCommand.Disconnect(a)))
     }
 
     private fun SettingsController.setAllowedNow(id: String, enabled: Boolean): SettingsResult? {
@@ -102,7 +101,6 @@ class FakeSettings(vararg addresses: String) : SettingsAccess {
     val devices = addresses.mapIndexed { i, address -> Speaker(address, "スピーカー ${i + 1}", i == 0) }
     val associated = mutableSetOf<String>()
     var saved = setOf<String>()
-    var copied: String? = null
     private var pending: Pair<String, (Boolean) -> Unit>? = null
     override fun hasPermission() = permission
     override fun bluetoothEnabled() = enabled
@@ -115,7 +113,6 @@ class FakeSettings(vararg addresses: String) : SettingsAccess {
     override fun saveAllowed(addresses: Set<String>) { saved = addresses.toSet() }
     override fun associate(address: String, complete: (Boolean) -> Unit) { pending = address to complete }
     override fun disassociate(address: String) { associated.remove(address) }
-    override fun copy(text: String) { copied = text }
     fun completeAssociation(accepted: Boolean) {
         val (address, complete) = checkNotNull(pending)
         pending = null

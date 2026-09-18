@@ -1,10 +1,10 @@
 # SoundTag
 
 Android 17以降で、許可したBluetoothスピーカーの操作をNFCタグに割り当てるKotlinアプリ。
-タグはNFC Toolsで書き込む。サーバー、アカウント、常駐サービスは不要。
+タグはSoundTagから直接書き込む。サーバー、アカウント、常駐サービスは不要。
 
-初版は `v0.1.0`。APKは[GitHub Releases](https://github.com/miyabisun/SoundTag/releases/tag/v0.1.0)から取得する。
-`SoundTag-v0.1.0.apk` と同じreleaseの `SHA256SUMS` で照合できる。
+APKは[GitHub Releases](https://github.com/miyabisun/SoundTag/releases/latest)から取得する。
+取得したAPKと同じreleaseの `SHA256SUMS` で照合できる。
 
 ## ビルド
 
@@ -31,22 +31,27 @@ package IDは `dev.miyabisun.soundtag`。開発用APKはAndroidのdebug鍵で署
 2. SoundTagを起動して付近のデバイスへのアクセスを許可する。
 3. 機器の「自動操作を許可」をONにし、Androidの確認画面で機器を関連付ける。
    この確認で機器が見つからない場合は、機器を近づけ、端末の位置情報サービスも確認する。
-4. 許可した機器をタップし、接続／切断を選んでコピーする。
-5. NFC Toolsで「書く（Write）」→「レコードを追加」→URIレコードへ貼り付ける。
-   カスタムURL / URIを選び、`soundtag://` から始まる値をそのまま保存する。
-   `https://` を付けたり、テキストレコードにしたりしない。標準Bluetoothレコードは削除する。
-6. URIレコードだけを書き込んで、NFC Toolsを閉じる。画面をロック解除してタグをかざす。
+4. 許可した機器をタップして「特定の機器の接続」を選ぶか、「全て切断」を選ぶ。
+5. 操作・機器を確認し、「タグに書き込む」を押してタグを端末の背面にかざす。
+   タグの既存内容を単一のURIレコードで上書きする。NFC Toolsは不要。
+6. 「書き込みました」と表示されたらタグを離して戻る。画面を閉じてタグをかざすと操作する。
 
-英語UIの基本経路は[開発元の書込み手順](https://www.wakdev.com/en/knowledge-base/how-to-guides/how-to-write-a-link-url-on-an-nfc-chip.html)にある。
-カスタムURIの項目名・日本語訳は導入済みNFC Toolsの版で実機確認する。
+書込み可能なNDEFタグと、AndroidがNDEF形式へフォーマットできるタグに対応する。
+読取専用・非対応・容量不足・タグ離脱などはエラーを表示する。タグをロックする機能はない。
+書込み中はタグを動かさない。画面を離れると中断し、戻っても自動再開しない。
+開始済みの書込みを元に戻す保証はないため、中断したタグは内容を確認して書き直す。
+書込み待ちから結果を閉じるまでは通常のタグ操作を起動しない。
+
 初回インストール後と強制停止後は、先にSoundTagを手動起動する。
 通常はアプリ画面を閉じていてもNFCで起動する。画面ロック中の読取りは前提にしない。
+自動操作の許可と現在の接続状態は別。許可OFFの機器は古いタグも利用できない。
+接続タグは最新の状態を確認し、許可した接続先以外の機器を切断してから対象に接続する。
+対象が既に接続済みなら維持する。「全て切断」は許可済みの機器だけを切断して終了する。
+許可対象外の時計等は操作しない。Bluetooth全体をOFFにはしない。
 
-自動操作の許可と現在の接続状態は別。許可OFFの機器は古いコードも利用できない。
-「スマホに戻す」のコードは許可したスピーカー全体を対象にする。
-接続のコード例は `soundtag://connect/00:11:22:33:44:AA`。
-切断は `soundtag://disconnect/00:11:22:33:44:AA`、スマホは `soundtag://phone`。
-実際のコードは機器を選んでコピーし、アドレスを手入力しない。
+既存URIと互換で、接続は `soundtag://connect/00:11:22:33:44:AA`、全切断は `soundtag://phone`。
+旧 `soundtag://disconnect/00:11:22:33:44:AA` タグも指定機器の切断として引き続き使える。
+新規作成は接続・全切断の2種類で、アドレスの手入力は不要。
 
 ## 検証
 
@@ -58,13 +63,15 @@ avdmanager create avd -n soundtag-api37 -k 'system-images;android-37.0;google_ap
 ./gradlew :app:connectedDebugAndroidTest
 ```
 
-JVMテストは不正URI、権限・関連付け、許可解除、遅延した承認、設定復元とコピーをfakeで検証する。
+JVMテストは不正URI、権限・関連付け、許可解除、遅延した承認、設定復元とタグ内容の生成をfakeで検証する。
 Bluetooth操作は同一タグ反復、A↔B切替、対象切断、スマホ復帰、対象外維持、
 競合要求、古い通知、許可取消し、API拒否、タイムアウトをfakeで検証する。
-instrumentationはfake機器の許可ON→タグコード→コピー→許可OFFを実画面部品で操作する。
-生成・コピーしたURIのNFC入力→結果表示、再読取り、画面再生成中の継続、拒否、timeout、終了も確認する。
+書込み判断は明示開始、2択、許可解除、取消し後の古い通知、失敗・再試行、容量不足をfakeで検証する。
+instrumentationは許可ON→操作選択→書込み待ち→fake NDEF書込み→結果→許可OFFを実画面部品で操作する。
+生成したNDEF内のURIをNFC受信経路へ渡し、実行順序と結果表示を確認する。
+再読取り、切替中の画面再生成、拒否、timeout、終了、書込み待ちの画面再生成とNFC OFFも確認する。
 OSとの境界をfakeにしてアプリ内の処理を通す。通常のADBからのIntent注入はNFC入口の権限で拒否される。
-この結果は実NFC、実Bluetooth接続、音声出力を証明しない。Pixelでの確認は別途必要。
+この結果は実NFC書込み・読取り、実Bluetooth接続、音声出力を証明しない。Pixelでの確認は別途必要。
 
 ## Bluetooth操作の呼出し口
 
@@ -88,7 +95,8 @@ OSとの境界をfakeにしてアプリ内の処理を通す。通常のADBか�
 
 ## Pixel 9へインストール
 
-この初版は開発用debug署名。package IDは `dev.miyabisun.soundtag`、versionCodeは1。
+配布APKは開発用debug署名。package IDは `dev.miyabisun.soundtag`。
+versionName / versionCodeはAPKとreleaseの記録で確認する。
 APKのSHA-256、source SHA、署名証明書のSHA-256はreleaseに添付する。
 同じ署名鍵のAPKは `-r` で更新できる。別署名の既存アプリがあれば自動削除せず、設定を控えて対応する。
 
@@ -108,7 +116,7 @@ adb devices -l
 ```sh
 sha256sum -c SHA256SUMS
 # devicesでPixelのserialを確認して指定する。エミュレータへ誤導入しない。
-adb -s PIXEL_SERIAL install -r SoundTag-v0.1.0.apk
+adb -s PIXEL_SERIAL install -r SoundTag-vX.Y.Z.apk
 adb -s PIXEL_SERIAL shell am start -n dev.miyabisun.soundtag/.MainActivity
 ```
 
@@ -118,10 +126,12 @@ Android 17でもADB導入は利用できる。
 
 ## 実機で確認する項目
 
-- Android 17のビルド番号、スピーカーA/Bの機種、再生アプリ、NFC Toolsの版を記録する。
-- 初回権限→スピーカーだけ許可→コピー→URIタグ作成を実画面で行う。
+- Android 17のビルド番号、スピーカーA/Bの機種、再生アプリ、使用したタグを記録する。
+- 初回権限→スピーカーだけ許可→接続／全切断のタグ書込みを実画面で行う。
+- 既存タグの上書き中にBluetooth操作が起動しないこと、書込み後の再読取りを確認する。
+- 読取専用・容量不足・タグ離脱・未フォーマット・NFC OFFと、失敗後の再試行を確認する。
 - Aタグで接続し、MagSafeから外して置き直してもAの接続と音を維持する。
-- 切断タグとスマホタグを確認する。他の出力機器がなければ本体出力へ戻る。
+- 全切断タグと旧指定機器切断タグを確認する。他の出力機器がなければ本体出力へ戻る。
 - BがあればA→B→Aで指定先から音が出ること、許可対象外の機器が維持されることを確認する。
 - 通常終了後のタグ起動、ロック中、強制停止後、未設定、Bluetooth OFF、許可解除後の古いタグを確認する。
 - 失敗時は手順と表示を記録する。音声の出力先変更と、再生アプリが一時停止する挙動を分ける。
@@ -133,3 +143,6 @@ Android 17でもADB導入は利用できる。
 - [Companion device pairing](https://developer.android.com/develop/connectivity/bluetooth/companion-device-pairing)
 - [BluetoothDevice](https://developer.android.com/reference/android/bluetooth/BluetoothDevice)
 - [NFC起動条件](https://developer.android.com/develop/connectivity/nfc/nfc)
+
+- [NDEF書込み](https://developer.android.com/reference/android/nfc/tech/Ndef)
+- [NFC reader mode](https://developer.android.com/reference/android/nfc/NfcAdapter#enableReaderMode(android.app.Activity,%20android.nfc.NfcAdapter.ReaderCallback,%20int,%20android.os.Bundle))

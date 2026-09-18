@@ -8,8 +8,6 @@ import android.companion.AssociationInfo
 import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
 import android.companion.CompanionDeviceManager
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.IntentSender
 import android.content.pm.PackageManager
@@ -67,9 +65,5 @@ class AndroidSettings(private val activity: Context) : SettingsAccess {
         companion?.myAssociations.orEmpty().filter {
             it.deviceMacAddress?.toString()?.equals(address, ignoreCase = true) == true
         }.forEach { companion?.disassociate(it.id) }
-    }
-    override fun copy(text: String) {
-        activity.getSystemService(ClipboardManager::class.java)
-            .setPrimaryClip(ClipData.newPlainText("SoundTag", text))
     }
 }

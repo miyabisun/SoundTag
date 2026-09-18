@@ -45,6 +45,26 @@ class SwitchControllerTest {
         assertEquals(setOf(a, watch), fake.state.audioConnected)
     }
 
+    @Test fun alreadyConnectedTargetIsKeptWhileOnlyOtherAllowedDevicesAreDisconnected() {
+        val fake = FakeBluetooth(a, b, watch)
+        fake.connected(a, b, watch)
+        val control = SwitchController(fake)
+        control.submit(TagCommand.Connect(a), 0)
+        assertEquals(listOf("disconnect:$b"), fake.calls)
+        fake.state = fake.state.copy(audioConnected = setOf(a, watch))
+        control.changed(10)
+        assertEquals(SwitchPhase.WORKING, control.status.phase)
+        assertEquals(listOf("disconnect:$b"), fake.calls)
+        fake.disconnected(b)
+        control.changed(20)
+        assertEquals(SwitchPhase.SUCCEEDED, control.status.phase)
+        assertEquals(setOf(a, watch), fake.state.audioConnected)
+        assertEquals(listOf("disconnect:$b"), fake.calls)
+        control.submit(TagCommand.Connect(watch), 30)
+        assertEquals(SwitchFailure.NOT_ALLOWED, control.status.failure)
+        assertEquals(listOf("disconnect:$b"), fake.calls)
+    }
+
     @Test fun disconnectAndPhoneAreNoOpsWhenAlreadyDisconnected() {
         val fake = FakeBluetooth(a, b, watch)
         fake.connected(a, b, watch)

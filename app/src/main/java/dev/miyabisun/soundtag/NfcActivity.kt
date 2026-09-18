@@ -79,7 +79,7 @@ class NfcActivity : Activity() {
             SwitchPhase.SUCCEEDED -> when (state.command) {
                 is TagCommand.Connect -> "接続しました"
                 is TagCommand.Disconnect -> "切断しました"
-                else -> "スマホに戻しました"
+                else -> "全て切断しました"
             }
             SwitchPhase.FAILED -> "操作できませんでした"
         }

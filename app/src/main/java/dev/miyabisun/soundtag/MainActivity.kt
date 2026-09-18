@@ -26,10 +26,13 @@ class MainActivity : Activity() {
     companion object {
         // Instrumentation supplies its fake here; there is no user-facing mock mode.
         internal var accessFactory: ((Activity) -> SettingsAccess)? = null
+        internal var nfcFactory: ((Activity) -> NfcWriting)? = null
     }
     private lateinit var controller: SettingsController
     private lateinit var access: SettingsAccess
     private lateinit var content: LinearLayout
+    private lateinit var nfc: NfcWriting
+    private lateinit var writer: TagWriter
     private var selected: TagCommand? = null
     private var message = ""
     private var registered = false
@@ -41,6 +44,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         access = accessFactory?.invoke(this) ?: AndroidSettings(this)
         controller = SettingsController(access)
+        nfc = nfcFactory?.invoke(this) ?: AndroidTagWriter(this)
+        writer = TagWriter(controller, nfc) { render() }
         selected = savedInstanceState?.getString("selected")?.let(TagCommand::parse)
         val filter = IntentFilter().apply {
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
@@ -62,6 +67,11 @@ class MainActivity : Activity() {
         super.onResume()
         if (::controller.isInitialized) render()
     }
+    override fun onPause() {
+        if (writer.phase == WritePhase.WRITING) message = "書込みを中断しました。タグの内容を確認してください"
+        writer.cancel()
+        super.onPause()
+    }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("selected", selected?.uri())
         super.onSaveInstanceState(outState)
@@ -71,6 +81,8 @@ class MainActivity : Activity() {
         render()
     }
     override fun onDestroy() {
+        writer.cancel()
+        (nfc as? AutoCloseable)?.close()
         controller.close()
         if (registered) unregisterReceiver(changes)
         super.onDestroy()
@@ -93,7 +105,7 @@ class MainActivity : Activity() {
         setContentView(scroll)
         label("SoundTag", 32, true)
         try {
-            if (selected != null) showCode(checkNotNull(selected)) else showSpeakers()
+            if (selected != null) showWriter(checkNotNull(selected)) else showSpeakers()
         } catch (_: SecurityException) {
             message = "権限を確認してください"
             permissionButton()
@@ -108,7 +120,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSpeakers() {
-        label("スピーカー", 22, true)
+        label("特定の機器の接続", 22, true)
         label("タグからの自動操作を許可", 16)
         val state = controller.snapshot()
         if (!state.permission) {
@@ -125,7 +137,7 @@ class MainActivity : Activity() {
             button("機器をペアリング") { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
         }
         state.speakers.forEach { row ->
-            button(row.speaker.name, "${row.speaker.name}のタグ用コード") {
+            button(row.speaker.name, "${row.speaker.name}に接続するタグ") {
                 selected = TagCommand.Connect(row.speaker.address)
                 message = ""
                 render()
@@ -160,8 +172,8 @@ class MainActivity : Activity() {
             }
             content.addView(toggle)
         }
-        label("スマホに戻す", 22, true)
-        button("スマホのタグ", "スマホに戻すタグ用コード") {
+        label("許可した機器をまとめて切断", 16)
+        button("全て切断", "許可した全ての機器を切断するタグ") {
             selected = TagCommand.Phone
             message = ""
             render()
@@ -171,71 +183,59 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showCode(command: TagCommand) {
-        button("スピーカー一覧") {
-            selected = null
-            message = ""
-            render()
-        }
+    private fun showWriter(command: TagCommand) {
+        val state = writer.phase
         val name = controller.snapshot().speakers.firstOrNull { it.speaker.address == command.target }?.speaker?.name
-        label(name ?: "スマホに戻す", 22, true)
-        if (command.target != null) {
-            button("▶  接続", "スピーカーに接続するタグ") {
-                selected = TagCommand.Connect(checkNotNull(command.target))
+        label(if (command == TagCommand.Phone) "全て切断" else "特定の機器の接続", 22, true)
+        label(name ?: "自動操作を許可した機器だけ", 18)
+        val text = writer.failure?.let { failure -> when (failure) {
+            WriteFailure.UNAVAILABLE -> "この端末はNFCに対応していません"
+            WriteFailure.DISABLED -> "NFCがOFFです"
+            WriteFailure.UNSUPPORTED -> "このタグには対応していません"
+            WriteFailure.READ_ONLY -> "このタグは書込みできません"
+            WriteFailure.TOO_SMALL -> "タグの容量が足りません"
+            WriteFailure.LOST -> "タグが離れました"
+            WriteFailure.IO -> "書込みを確認できませんでした"
+            WriteFailure.NOT_ALLOWED -> "機器の自動操作を許可してください"
+        } } ?: when (state) {
+            WritePhase.IDLE -> "操作をタグに保存"
+            WritePhase.WAITING -> "タグをかざしてください"
+            WritePhase.WRITING -> "書込み中…"
+            WritePhase.SUCCEEDED -> "書き込みました"
+            WritePhase.FAILED -> "書込みできませんでした"
+        }
+        content.addView(ImageView(this).apply {
+            setImageResource(when (state) {
+                WritePhase.SUCCEEDED -> R.drawable.ic_success
+                WritePhase.FAILED -> R.drawable.ic_error
+                else -> R.drawable.ic_tag
+            })
+            contentDescription = text
+        }, LinearLayout.LayoutParams(dp(64), dp(64)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        label(text, 22, true).accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        if (state == WritePhase.IDLE || state == WritePhase.FAILED) {
+            label("タグの内容を上書きします", 16)
+            button(if (state == WritePhase.IDLE) "タグに書き込む" else "もう一度書き込む") {
                 message = ""
-                render()
+                writer.start(command)
             }
-            button("⏹  切断", "スピーカーを切断するタグ") {
-                selected = TagCommand.Disconnect(checkNotNull(command.target))
-                message = ""
-                render()
+            if (writer.failure == WriteFailure.DISABLED) {
+                button("NFCを開く") { startActivity(Intent(Settings.ACTION_NFC_SETTINGS)) }
             }
         }
-        val code = controller.code(command)
-        label(when (command) {
-            is TagCommand.Connect -> "▶  接続"
-            is TagCommand.Disconnect -> "⏹  切断"
-            TagCommand.Phone -> "スマホ"
-        }, 22, true)
-        val steps = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val targetIcon = if (command == TagCommand.Phone) R.drawable.ic_phone else R.drawable.ic_soundtag
-        val targetLabel = if (command == TagCommand.Phone) "スマホ" else "スピーカー"
-        listOf(targetIcon to targetLabel, R.drawable.ic_copy to "コピー", R.drawable.ic_tag to "NFCタグ")
-            .forEachIndexed { index, (icon, caption) ->
-                if (index > 0) steps.addView(TextView(this).apply {
-                    text = "→"
-                    textSize = 22f
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                })
-                val step = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER
-                    setPadding(0, dp(16), 0, dp(16))
-                    addView(ImageView(this@MainActivity).apply {
-                        setImageResource(icon)
-                        contentDescription = caption
-                    }, LinearLayout.LayoutParams(dp(40), dp(40)))
-                    addView(TextView(this@MainActivity).apply {
-                        text = caption
-                        textSize = 14f
-                        gravity = Gravity.CENTER
-                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    })
-                }
-                steps.addView(step, LinearLayout.LayoutParams(0, -2, 1f))
+        if (state == WritePhase.WAITING || state == WritePhase.WRITING) {
+            label("タグを端末の背面に近づけてください", 16)
+            button("中止") {
+                message = if (writer.phase == WritePhase.WRITING) "タグの内容を確認してください" else ""
+                writer.cancel()
+                render()
             }
-        content.addView(steps)
-        if (code == null) {
-            label("機器の自動操作を許可してください", 16)
-            return
+        } else if (state == WritePhase.IDLE) {
+            button("スピーカー一覧") { selected = null; message = ""; render() }
+        } else {
+            label("タグを離してから戻ってください", 16)
+            button("タグを離して戻る") { writer.cancel(); message = ""; render() }
         }
-        label(code, 14).apply { setTextIsSelectable(true) }
-        button("コピー", "タグ用コードをコピー") {
-            message = if (controller.copy(command)) "コピーしました" else "機器の許可を確認してください"
-            render()
-        }.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_copy, 0, 0, 0)
-        label("NFC Tools → URIレコード", 16)
-        label("Bluetoothレコードは削除", 14)
     }
 
     private fun permissionButton() {

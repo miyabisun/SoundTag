@@ -17,7 +17,6 @@ interface SettingsAccess {
     fun saveAllowed(addresses: Set<String>)
     fun associate(address: String, complete: (Boolean) -> Unit)
     fun disassociate(address: String)
-    fun copy(text: String)
 }
 
 enum class SettingsResult { SAVED, PERMISSION_REQUIRED, BLUETOOTH_OFF, UNKNOWN_DEVICE, ASSOCIATION_FAILED }
@@ -67,12 +66,6 @@ class SettingsController(private val access: SettingsAccess) {
         val allowed = snapshot().speakers.filter { it.allowed }.map { it.speaker.address }
         if (allowed.isEmpty() || (command.target != null && command.target !in allowed)) return null
         return command.uri().takeIf { TagCommand.parse(it) == command }
-    }
-
-    fun copy(command: TagCommand): Boolean {
-        val code = code(command) ?: return false
-        access.copy(code)
-        return true
     }
 
     fun close() { revision++ }
