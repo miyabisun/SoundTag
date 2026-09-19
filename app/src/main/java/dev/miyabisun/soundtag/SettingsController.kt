@@ -28,7 +28,7 @@ class SettingsController(private val access: SettingsAccess) {
         if (!access.hasPermission()) return SettingsSnapshot(false, false, emptyList())
         val allowed = access.allowed().intersect(access.associations())
         return SettingsSnapshot(true, access.bluetoothEnabled(),
-            access.speakers().map { SpeakerSetting(it, it.address in allowed) })
+            access.speakers().map { SpeakerSetting(it, it.address in allowed) }.sortedByDescending { it.allowed })
     }
 
     fun setAllowed(address: String, enabled: Boolean, complete: (SettingsResult) -> Unit) {

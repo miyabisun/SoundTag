@@ -141,8 +141,8 @@ class SettingsScreenTest {
     @Test fun themesAndBackKeepDevicesReadableAndCancelWaiting() {
         val fake = WriterSettings(address).apply {
             saved = setOf(address)
-            devices = listOf(Speaker(address, "デスクのスピーカー", true),
-                Speaker("00:11:22:33:44:BB", "お風呂で使う防水スピーカー — Bose Flex SoundLink", false),
+            devices = listOf(Speaker("00:11:22:33:44:BB", "お風呂で使う防水スピーカー — Bose Flex SoundLink", false),
+                Speaker(address, "デスクのスピーカー", true),
                 Speaker("00:11:22:33:44:CC", "リビング", false))
         }
         val nfc = ScreenNfc()
@@ -158,6 +158,7 @@ class SettingsScreenTest {
                         backgrounds += (views.filterIsInstance<ScrollView>().single().background as ColorDrawable).color
                         assertLabel(activity.window.decorView, "接続中")
                         assertEquals(3, views.filterIsInstance<Switch>().size)
+                        assertEquals("デスクのスピーカー", views.filterIsInstance<Button>().first().text.toString())
                     }
                     capture(screen, "settings-$mode")
                     screen.onActivity { activity -> click(activity.window.decorView, "デスクのスピーカー") }

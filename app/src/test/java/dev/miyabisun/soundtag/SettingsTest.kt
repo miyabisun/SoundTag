@@ -7,6 +7,21 @@ class SettingsTest {
     private val a = "00:11:22:33:44:AA"
     private val b = "00:11:22:33:44:BB"
 
+    @Test fun authorizedSpeakersAppearFirstWithoutChangingConsentOrPeerOrder() {
+        val c = "00:11:22:33:44:CC"
+        val d = "00:11:22:33:44:DD"
+        val fake = FakeSettings(a, b, c, d).apply {
+            saved = setOf(b, c, d)
+            associated.addAll(setOf(b, d))
+        }
+        val settings = SettingsController(fake)
+        assertEquals(listOf(b, d, a, c), settings.snapshot().speakers.map { it.speaker.address })
+        fake.associated.remove(b)
+        assertEquals(listOf(d, a, b, c), settings.snapshot().speakers.map { it.speaker.address })
+        assertEquals(setOf(b, c, d), fake.saved)
+        assertNull(settings.code(TagCommand.Connect(c)))
+    }
+
     @Test fun tagCommandsRoundTripAndRejectUntrustedInput() {
         for (command in listOf(TagCommand.Connect(a), TagCommand.Disconnect(a), TagCommand.Phone)) {
             assertEquals(command, TagCommand.parse(command.uri()))
