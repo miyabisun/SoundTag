@@ -120,6 +120,21 @@ class MainActivity : Activity() {
     }
 
     private fun showSpeakers() {
+        if (!OperationNotifications(this).resultsEnabled()) {
+            label("接続状態が変わったときの通知がOFFです", 16)
+            button("通知を設定") {
+                val preferences = getPreferences(MODE_PRIVATE)
+                if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                    (!preferences.getBoolean("notificationsAsked", false) ||
+                        shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+                    preferences.edit().putBoolean("notificationsAsked", true).apply()
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+                } else {
+                    startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                }
+            }
+        }
         label("特定の機器の接続", 22, true)
         label("タグからの自動操作を許可", 16)
         val state = controller.snapshot()

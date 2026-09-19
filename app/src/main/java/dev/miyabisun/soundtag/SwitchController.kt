@@ -42,9 +42,17 @@ class SwitchController(private val access: BluetoothAccess) {
     private var closed = false
     private var cancelling: String? = null
     private var cancellationSawLink = false
+    var connectionsChanged = false
+        private set
+    private var initialConnections: Pair<Set<String>, Set<String>>? = null
+    private var observedDevices = emptySet<String>()
     val hasPendingWork get() = status.phase == SwitchPhase.WORKING || cancelling != null
 
     fun submit(command: TagCommand, nowMs: Long): SwitchFailure? {
+        if (status.phase != SwitchPhase.WORKING) {
+            initialConnections = null
+            connectionsChanged = false
+        }
         if (closed) {
             status = SwitchStatus(SwitchPhase.FAILED, command, SwitchFailure.CLOSED)
             return SwitchFailure.CLOSED
@@ -67,6 +75,7 @@ class SwitchController(private val access: BluetoothAccess) {
         if (closed || (status.phase != SwitchPhase.WORKING && cancelling == null)) return
         try {
             val state = access.snapshot()
+            observeConnections(state)
             settleCancellation(state)
             if (status.phase == SwitchPhase.WORKING) advance(state, nowMs)
         } catch (_: SecurityException) {
@@ -74,6 +83,14 @@ class SwitchController(private val access: BluetoothAccess) {
         } catch (_: IllegalStateException) {
             fail(SwitchFailure.API_REJECTED)
         }
+    }
+
+    private fun observeConnections(state: BluetoothSnapshot) {
+        if (!state.permission || (state.enabled && !state.profilesReady)) return
+        if (initialConnections == null) observedDevices = state.authorized
+        val connections = (state.audioConnected intersect observedDevices) to (state.linked intersect observedDevices)
+        if (initialConnections == null) initialConnections = connections
+        connectionsChanged = connections != initialConnections
     }
 
     private fun advance(state: BluetoothSnapshot, nowMs: Long) {

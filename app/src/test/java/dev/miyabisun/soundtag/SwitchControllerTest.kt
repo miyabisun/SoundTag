@@ -8,6 +8,66 @@ class SwitchControllerTest {
     private val b = "00:11:22:33:44:BB"
     private val watch = "00:11:22:33:44:CC"
 
+    @Test fun reportsOnlyObservedConnectionChangesAndResetsForNoOps() {
+        val fake = FakeBluetooth(a, b, watch)
+        val control = SwitchController(fake)
+        control.submit(TagCommand.Connect(a), 0)
+        assertFalse(control.connectionsChanged)
+        fake.connected(a)
+        control.changed(10)
+        assertTrue(control.connectionsChanged)
+        control.submit(TagCommand.Connect(a), 20)
+        assertFalse(control.connectionsChanged)
+        control.submit(TagCommand.Phone, 30)
+        fake.disconnected(a)
+        control.changed(40)
+        assertTrue(control.connectionsChanged)
+        control.submit(TagCommand.Phone, 50)
+        assertFalse(control.connectionsChanged)
+        control.submit(TagCommand.Connect(watch), 60)
+        assertFalse(control.connectionsChanged)
+    }
+
+    @Test fun waitsForInitialProfilesAndIgnoresUnrelatedDevicesAndTransientStates() {
+        val fake = FakeBluetooth(a, b, watch)
+        fake.state = fake.state.copy(profilesReady = false, linked = setOf(a))
+        val control = SwitchController(fake)
+        control.submit(TagCommand.Connect(a), 0)
+        fake.connected(a)
+        fake.state = fake.state.copy(profilesReady = true)
+        control.changed(10)
+        assertFalse(control.connectionsChanged)
+        control.submit(TagCommand.Connect(b), 20)
+        fake.state = fake.state.copy(transitioning = setOf(a))
+        fake.connected(watch)
+        control.changed(30)
+        assertFalse(control.connectionsChanged)
+        fake.disconnected(a)
+        fake.accept = false
+        control.changed(40)
+        assertEquals(SwitchFailure.API_REJECTED, control.status.failure)
+        assertTrue(control.connectionsChanged)
+    }
+
+    @Test fun timeoutWithoutChangeIsSilentAndReturningToOriginalStateIsSilent() {
+        val fake = FakeBluetooth(a, b, watch)
+        val control = SwitchController(fake)
+        control.submit(TagCommand.Connect(a), 0)
+        control.changed(SwitchController.TIMEOUT_MS)
+        assertFalse(control.connectionsChanged)
+        fake.disconnected(a)
+        control.changed(SwitchController.TIMEOUT_MS + 1)
+        fake.connected(a)
+        control.submit(TagCommand.Connect(b), 40_000)
+        control.submit(TagCommand.Connect(a), 40_010)
+        fake.disconnected(a)
+        control.changed(40_020)
+        assertTrue(control.connectionsChanged)
+        fake.connected(a)
+        control.changed(40_030)
+        assertFalse(control.connectionsChanged)
+    }
+
     @Test fun sameTagIsIdempotentAndAcceptanceIsNotSuccess() {
         val fake = FakeBluetooth(a, b, watch)
         val control = SwitchController(fake)

@@ -1,9 +1,6 @@
 package dev.miyabisun.soundtag
 
-import android.content.Intent
-import android.net.Uri
 import android.nfc.NdefMessage
-import android.nfc.NfcAdapter
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -35,7 +32,7 @@ class SettingsScreenTest {
         }
         MainActivity.accessFactory = { fake }
         MainActivity.nfcFactory = { nfc }
-        NfcActivity.bluetoothFactory = { _, changed -> bluetooth.apply { notify = changed } }
+        NfcService.bluetoothFactory = { _, changed -> bluetooth.apply { notify = changed } }
         try {
             ActivityScenario.launch(MainActivity::class.java).use { screen ->
                 screen.onActivity { activity ->
@@ -81,18 +78,16 @@ class SettingsScreenTest {
             }
             assertEquals(listOf("soundtag://connect/$address", "soundtag://phone", "soundtag://phone"), codes)
             for ((index, code) in listOf(codes.first(), codes.last()).withIndex()) {
-                val intent = Intent(InstrumentationRegistry.getInstrumentation().targetContext, NfcActivity::class.java)
-                    .setAction(NfcAdapter.ACTION_NDEF_DISCOVERED).setData(Uri.parse(code))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                ActivityScenario.launch<NfcActivity>(intent).use { screen ->
-                    screen.onActivity { activity ->
-                        assertEquals(if (index == 0) "connect:$address" else "disconnect:$address", bluetooth.calls.last())
-                        bluetooth.connected = if (index == 0) setOf(address) else emptySet()
-                        bluetooth.notify()
-                        assertLabel(activity.window.decorView, if (index == 0) "接続しました" else "全て切断しました")
-                    }
+                deliverTag(code)
+                eventually { bluetooth.calls.size == index + 1 }
+                appThread {
+                    assertEquals(if (index == 0) "connect:$address" else "disconnect:$address", bluetooth.calls.last())
+                    bluetooth.connected = if (index == 0) setOf(address) else emptySet()
+                    bluetooth.notify()
                 }
+                eventually { NfcService.pendingSession == null }
             }
+
             ActivityScenario.launch(MainActivity::class.java).use { screen ->
                 screen.onActivity { activity ->
                     descendants(activity.window.decorView).filterIsInstance<Switch>().single().performClick()
@@ -104,7 +99,7 @@ class SettingsScreenTest {
         } finally {
             MainActivity.accessFactory = null
             MainActivity.nfcFactory = null
-            NfcActivity.bluetoothFactory = null
+            NfcService.bluetoothFactory = null
         }
     }
 

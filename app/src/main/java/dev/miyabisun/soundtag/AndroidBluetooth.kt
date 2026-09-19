@@ -15,7 +15,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 
-/** Activity-scoped public API adapter. Close it after closing the controller. */
+/** Public API adapter scoped to one operation session. Close it after closing the controller. */
 class AndroidBluetooth(
     private val context: Context,
     private val settings: SettingsAccess,

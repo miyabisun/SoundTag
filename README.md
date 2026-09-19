@@ -1,7 +1,7 @@
 # SoundTag
 
 Android 17以降で、許可したBluetoothスピーカーの操作をNFCタグに割り当てるKotlinアプリ。
-タグはSoundTagから直接書き込む。サーバー、アカウント、常駐サービスは不要。
+タグはSoundTagから直接書き込む。サーバー、アカウント、常時監視は不要。
 
 APKは[GitHub Releases](https://github.com/miyabisun/SoundTag/releases/latest)から取得する。
 取得したAPKと同じreleaseの `SHA256SUMS` で照合できる。
@@ -28,7 +28,7 @@ package IDは `dev.miyabisun.soundtag`。開発用APKはAndroidのdebug鍵で署
 ## 設定とタグ
 
 1. Bluetooth設定でスピーカーをペアリングする。
-2. SoundTagを起動して付近のデバイスへのアクセスを許可する。
+2. SoundTagを起動して付近のデバイスへのアクセスを許可する。「通知を設定」で通知も許可する。
 3. 機器の「自動操作を許可」をONにし、Androidの確認画面で機器を関連付ける。
    この確認で機器が見つからない場合は、機器を近づけ、端末の位置情報サービスも確認する。
 4. 許可した機器をタップして「特定の機器の接続」を選ぶか、「全て切断」を選ぶ。
@@ -49,6 +49,15 @@ package IDは `dev.miyabisun.soundtag`。開発用APKはAndroidのdebug鍵で署
 対象が既に接続済みなら維持する。「全て切断」は許可済みの機器だけを切断して終了する。
 許可対象外の時計等は操作しない。Bluetooth全体をOFFにはしない。
 
+タグ読取りでは画面を開かず、他のアプリを表示したまま操作する。実際に許可対象の
+接続状態が変わったときだけAndroidの結果通知を出す。接続済みの機器への再タッチ、
+未接続時の全切断、状態が変わらない失敗では結果通知を出さない。
+一部だけ切断して接続に失敗した場合は、状態変化と失敗理由を通知する。
+通知を押すと設定を開く。通知を拒否・無効化している場合も接続操作は可能で、
+タグの度に権限画面を開かない。通常起動の「通知を設定」から許可・再設定できる。
+OSが必要とする処理中の通知は結果通知とは別で、短時間の処理では表示を遅延する。
+接続操作の完了または30秒の期限でサービスを終了する。
+
 既存URIと互換で、接続は `soundtag://connect/00:11:22:33:44:AA`、全切断は `soundtag://phone`。
 旧 `soundtag://disconnect/00:11:22:33:44:AA` タグも指定機器の切断として引き続き使える。
 新規作成は接続・全切断の2種類で、アドレスの手入力は不要。
@@ -68,8 +77,13 @@ Bluetooth操作は同一タグ反復、A↔B切替、対象切断、スマホ復
 競合要求、古い通知、許可取消し、API拒否、タイムアウトをfakeで検証する。
 書込み判断は明示開始、2択、許可解除、取消し後の古い通知、失敗・再試行、容量不足をfakeで検証する。
 instrumentationは許可ON→操作選択→書込み待ち→fake NDEF書込み→結果→許可OFFを実画面部品で操作する。
-生成したNDEF内のURIをNFC受信経路へ渡し、実行順序と結果表示を確認する。
-再読取り、切替中の画面再生成、拒否、timeout、終了、書込み待ちの画面再生成とNFC OFFも確認する。
+生成したNDEF内のURIを画面なしNFC受信経路へ渡し、実行順序を確認する。
+別アプリ表示の維持、接続/全切断時の結果通知、反復・拒否・無変化timeout時の無通知、
+部分変更の失敗通知、通知OFF、サービス終了、遅延した取消しを確認する。
+書込み待ちの画面再生成とNFC OFFも確認する。
+通知拒否のケースは事前に `pm revoke dev.miyabisun.soundtag android.permission.POST_NOTIFICATIONS` を
+実行し、`NfcFlowTest#deniedNotificationPermissionStillConnectsWithoutOpeningPermissionUi` を単独実行する。
+実行中の権限剥奪はinstrumentationのプロセスも終了するため、テスト内では剥奪しない。
 OSとの境界をfakeにしてアプリ内の処理を通す。通常のADBからのIntent注入はNFC入口の権限で拒否される。
 この結果は実NFC書込み・読取り、実Bluetooth接続、音声出力を証明しない。Pixelでの確認は別途必要。
 
@@ -86,11 +100,16 @@ OSとの境界をfakeにしてアプリ内の処理を通す。通常のADBか�
 切断を試みる。OSへの中止要求も非同期なので、電源OFFや到達不能時に取消し完了を保証しない。
 タイムアウト後は取消し未確認の対象を保持する。実リンクの終了または切断通知が確認できるまで、
 後続要求を実行・成功扱いにしない。
-`NfcSession` が通知と期限、`NfcActivity` が結果表示を担当する。
-画面再生成では同じ操作を保持し、プロセス再起動時は古いタグを自動再実行しない。
-画面を閉じると未完了操作の中止を依頼する。取消しが未確認なら同一プロセス内で保持し、
-次のNFC起動にも引き継ぐ。取消しを含む処理が落ち着いたらバックグラウンドの通知購読を終了する。
-取消し待ちはOSの状態通知だけを受け、常駐サービスや定期監視は使わない。
+`NfcActivity` はAndroidの `Theme.NoDisplay` でURIを受け、非公開の
+`NfcService` へ渡して即座に終了する。サービスは `connectedDevice` として必要な
+期間だけ動作し、`NfcSession` が状態通知と期限を扱う。関連付け済み機器について
+Companion Device Managerのバックグラウンド開始権限を宣言する。
+接続状態の比較はプロファイル情報が揃ってから、操作開始時の許可対象について行う。
+途中の接続中/切断中だけでは結果通知せず、観測した音声接続とACLを比較する。
+プロセス再起動時は古いタグを自動再実行しない。
+取消しが未確認なら同一プロセス内でsessionを保持し、次のNFC起動にも引き継ぐ。
+その場合もサービスは終了し、既存のOS状態通知だけで遅延した接続の切断を試みる。
+取消しを含む処理が落ち着いたら通知購読を終了する。定期監視は使わない。
 プロセス強制終了後まで未完了操作を記録・監視するものではない。
 
 ## Pixel 9へインストール
@@ -133,6 +152,9 @@ Android 17でもADB導入は利用できる。
 - Aタグで接続し、MagSafeから外して置き直してもAの接続と音を維持する。
 - 全切断タグと旧指定機器切断タグを確認する。他の出力機器がなければ本体出力へ戻る。
 - BがあればA→B→Aで指定先から音が出ること、許可対象外の機器が維持されることを確認する。
+- YouTube表示中に接続/全切断し、動画を覆わず、接続状態が変わった場合だけ通知することを確認する。
+- 接続済みタグの再タッチ、未接続での全切断では結果通知が増えないことを確認する。
+- 通知を拒否/無効化した状態でタグをかざしても権限画面が出ないことを確認する。
 - 通常終了後のタグ起動、ロック中、強制停止後、未設定、Bluetooth OFF、許可解除後の古いタグを確認する。
 - 失敗時は手順と表示を記録する。音声の出力先変更と、再生アプリが一時停止する挙動を分ける。
 
@@ -146,3 +168,7 @@ Android 17でもADB導入は利用できる。
 
 - [NDEF書込み](https://developer.android.com/reference/android/nfc/tech/Ndef)
 - [NFC reader mode](https://developer.android.com/reference/android/nfc/NfcAdapter#enableReaderMode(android.app.Activity,%20android.nfc.NfcAdapter.ReaderCallback,%20int,%20android.os.Bundle))
+
+- [バックグラウンドからのサービス起動条件](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)
+- [connectedDeviceサービス](https://developer.android.com/develop/background-work/services/fgs/service-types#connected-device)
+- [通知の実行時権限](https://developer.android.com/develop/ui/views/notifications/notification-permission)
