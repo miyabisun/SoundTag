@@ -45,6 +45,9 @@ package IDは `dev.miyabisun.soundtag`。開発用APKはAndroidのdebug鍵で署
 初回インストール後と強制停止後は、先にSoundTagを手動起動する。
 通常はアプリ画面を閉じていてもNFCで起動する。画面ロック中の読取りは前提にしない。
 自動操作の許可と現在の接続状態は別。許可OFFの機器は古いタグも利用できない。
+設定画面は端末の明暗設定に追従する。機器名・接続状態・許可を同じ枠で表示し、
+長い名前は折り返す。書込み結果の「タグを離して戻る」で一覧へ戻る。
+システムの戻る操作も書込みを中止して一覧へ戻る。
 接続タグは最新の状態を確認し、許可した接続先以外の機器を切断してから対象に接続する。
 対象が既に接続済みなら維持する。「全て切断」は許可済みの機器だけを切断して終了する。
 許可対象外の時計等は操作しない。Bluetooth全体をOFFにはしない。
@@ -56,6 +59,8 @@ package IDは `dev.miyabisun.soundtag`。開発用APKはAndroidのdebug鍵で署
 通知を押すと設定を開く。通知を拒否・無効化している場合も接続操作は可能で、
 タグの度に権限画面を開かない。通常起動の「通知を設定」から許可・再設定できる。
 OSが必要とする処理中の通知は結果通知とは別で、短時間の処理では表示を遅延する。
+Pixel 9のv0.1.2実機確認では、OS側で結果通知を「サイレント」にした条件で
+YouTubeの表示維持を確認した。「通知を設定」から変更でき、アプリ更新でも設定を上書きしない。
 接続操作の完了または30秒の期限でサービスを終了する。
 
 既存URIと互換で、接続は `soundtag://connect/00:11:22:33:44:AA`、全切断は `soundtag://phone`。
@@ -81,6 +86,22 @@ instrumentationは許可ON→操作選択→書込み待ち→fake NDEF書込み
 別アプリ表示の維持、接続/全切断時の結果通知、反復・拒否・無変化timeout時の無通知、
 部分変更の失敗通知、通知OFF、サービス終了、遅延した取消しを確認する。
 書込み待ちの画面再生成とNFC OFFも確認する。
+設定画面は明暗・複数機器・長名・空/権限拒否/Bluetooth OFF、書込みの成功/失敗/再試行と
+戻る操作・スクロール維持を確認する。320dp幅・2倍文字でもSettingsScreenTestを実行し、
+省略/文字切れ・48dpの操作領域を検査する。エミュレータのserialを明示して以下を実行する。
+
+```sh
+adb -s emulator-5554 shell wm size 840x1680
+adb -s emulator-5554 shell wm density 420
+adb -s emulator-5554 shell settings put system font_scale 2.0
+ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.miyabisun.soundtag.SettingsScreenTest
+# 終了後は元に戻す
+adb -s emulator-5554 shell wm size reset
+adb -s emulator-5554 shell wm density reset
+adb -s emulator-5554 shell settings put system font_scale 1.0
+```
+
+画像と部品寸法はエミュレータの `/data/local/tmp/` に保存する。
 通知拒否のケースは事前に `pm revoke dev.miyabisun.soundtag android.permission.POST_NOTIFICATIONS` を
 実行し、`NfcFlowTest#deniedNotificationPermissionStillConnectsWithoutOpeningPermissionUi` を単独実行する。
 実行中の権限剥奪はinstrumentationのプロセスも終了するため、テスト内では剥奪しない。

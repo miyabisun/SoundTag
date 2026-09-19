@@ -8,7 +8,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.Color
+import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
@@ -21,6 +23,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 
 class MainActivity : Activity() {
     companion object {
@@ -33,6 +37,9 @@ class MainActivity : Activity() {
     private lateinit var content: LinearLayout
     private lateinit var nfc: NfcWriting
     private lateinit var writer: TagWriter
+    private lateinit var scroll: ScrollView
+    private var renderedSelection: TagCommand? = null
+    private val backToSpeakers = OnBackInvokedCallback { showList() }
     private var selected: TagCommand? = null
     private var message = ""
     private var registered = false
@@ -81,6 +88,7 @@ class MainActivity : Activity() {
         render()
     }
     override fun onDestroy() {
+        onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backToSpeakers)
         writer.cancel()
         (nfc as? AutoCloseable)?.close()
         controller.close()
@@ -89,8 +97,12 @@ class MainActivity : Activity() {
     }
 
     private fun render() {
-        val scroll = ScrollView(this).apply {
-            setBackgroundColor(Color.rgb(248, 250, 248))
+        val position = if (::scroll.isInitialized && renderedSelection == selected) scroll.scrollY else 0
+        renderedSelection = selected
+        if (selected == null) onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backToSpeakers)
+        else onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backToSpeakers)
+        scroll = ScrollView(this).apply {
+            setBackgroundColor(getColor(R.color.background))
             setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -99,11 +111,13 @@ class MainActivity : Activity() {
         }
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(24), dp(24), dp(32))
+            isFocusableInTouchMode = true
+            setPadding(dp(16), dp(16), dp(16), dp(24))
         }
         scroll.addView(content)
         setContentView(scroll)
-        label("SoundTag", 32, true)
+        content.requestFocus()
+        label("SoundTag", 28, true)
         try {
             if (selected != null) showWriter(checkNotNull(selected)) else showSpeakers()
         } catch (_: SecurityException) {
@@ -114,33 +128,20 @@ class MainActivity : Activity() {
         }
         if (message.isNotEmpty()) label(message, 16).apply {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            setTextColor(Color.rgb(33, 94, 85))
+            setTextColor(getColor(R.color.accent))
         }
         scroll.requestApplyInsets()
+        scroll.apply { post { scrollTo(0, position) } }
     }
 
     private fun showSpeakers() {
-        if (!OperationNotifications(this).resultsEnabled()) {
-            label("接続状態が変わったときの通知がOFFです", 16)
-            button("通知を設定") {
-                val preferences = getPreferences(MODE_PRIVATE)
-                if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
-                    (!preferences.getBoolean("notificationsAsked", false) ||
-                        shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
-                    preferences.edit().putBoolean("notificationsAsked", true).apply()
-                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
-                } else {
-                    startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
-                }
-            }
-        }
-        label("特定の機器の接続", 22, true)
-        label("タグからの自動操作を許可", 16)
+        label("接続タグ", 22, true)
+        label("許可した機器を選んでタグを作成", 14, muted = true)
         val state = controller.snapshot()
         if (!state.permission) {
             label("Bluetoothへのアクセスが必要です", 16)
             permissionButton()
+            notificationButton()
             return
         }
         if (!state.bluetoothEnabled) {
@@ -152,14 +153,25 @@ class MainActivity : Activity() {
             button("機器をペアリング") { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
         }
         state.speakers.forEach { row ->
-            button(row.speaker.name, "${row.speaker.name}に接続するタグ") {
+            val panel = panel()
+            button(row.speaker.name, "${row.speaker.name}に接続するタグ", parent = panel) {
                 selected = TagCommand.Connect(row.speaker.address)
                 message = ""
                 render()
-            }.isEnabled = row.allowed
-            label(if (row.speaker.connected) "接続中" else "未接続", 14)
+            }.apply {
+                isEnabled = row.allowed
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+                setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, R.drawable.ic_next, 0)
+            }
+            label(if (row.speaker.connected) "接続中" else "未接続", 14, parent = panel)
+                .setTextColor(getColor(if (row.speaker.connected) R.color.accent else R.color.muted))
             val toggle = Switch(this).apply {
                 text = "自動操作を許可"
+                textSize = 16f
+                setTextColor(getColor(R.color.text))
+                setPadding(dp(12), 0, dp(12), 0)
                 contentDescription = "${row.speaker.name}の自動操作を許可"
                 minHeight = dp(48)
                 isChecked = row.allowed
@@ -185,9 +197,10 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            content.addView(toggle)
+            panel.addView(toggle, LinearLayout.LayoutParams(-1, -2))
         }
-        label("許可した機器をまとめて切断", 16)
+        label("切断タグ", 22, true)
+        label("自動操作を許可した機器だけをまとめて切断", 14, muted = true)
         button("全て切断", "許可した全ての機器を切断するタグ") {
             selected = TagCommand.Phone
             message = ""
@@ -195,6 +208,23 @@ class MainActivity : Activity() {
         }.apply {
             isEnabled = state.speakers.any { it.allowed }
             setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_phone, 0, 0, 0)
+        }
+        notificationButton()
+    }
+
+    private fun notificationButton() {
+        label(if (OperationNotifications(this).resultsEnabled()) "通知は接続状態が変わったときだけ" else "接続状態の通知がOFFです", 14, muted = true)
+        button("通知を設定") {
+            val preferences = getPreferences(MODE_PRIVATE)
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                (!preferences.getBoolean("notificationsAsked", false) ||
+                    shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+                preferences.edit().putBoolean("notificationsAsked", true).apply()
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+            } else {
+                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+            }
         }
     }
 
@@ -219,18 +249,23 @@ class MainActivity : Activity() {
             WritePhase.SUCCEEDED -> "書き込みました"
             WritePhase.FAILED -> "書込みできませんでした"
         }
-        content.addView(ImageView(this).apply {
+        val panel = panel()
+        panel.addView(ImageView(this).apply {
             setImageResource(when (state) {
                 WritePhase.SUCCEEDED -> R.drawable.ic_success
                 WritePhase.FAILED -> R.drawable.ic_error
                 else -> R.drawable.ic_tag
             })
-            contentDescription = text
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(64), dp(64)).apply { gravity = Gravity.CENTER_HORIZONTAL })
-        label(text, 22, true).accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        label(text, 22, true, parent = panel).apply {
+            gravity = Gravity.CENTER
+            setTextColor(getColor(if (state == WritePhase.FAILED) R.color.danger else R.color.text))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
         if (state == WritePhase.IDLE || state == WritePhase.FAILED) {
             label("タグの内容を上書きします", 16)
-            button(if (state == WritePhase.IDLE) "タグに書き込む" else "もう一度書き込む") {
+            button(if (state == WritePhase.IDLE) "タグに書き込む" else "もう一度書き込む", primary = true) {
                 message = ""
                 writer.start(command)
             }
@@ -246,10 +281,10 @@ class MainActivity : Activity() {
                 render()
             }
         } else if (state == WritePhase.IDLE) {
-            button("スピーカー一覧") { selected = null; message = ""; render() }
+            button("スピーカー一覧") { showList() }
         } else {
             label("タグを離してから戻ってください", 16)
-            button("タグを離して戻る") { writer.cancel(); message = ""; render() }
+            button("タグを離して戻る") { showList() }
         }
     }
 
@@ -263,24 +298,50 @@ class MainActivity : Activity() {
             }
         }
     }
-    private fun label(value: String, size: Int, bold: Boolean = false): TextView =
-        TextView(this).apply {
-            text = value
-            textSize = size.toFloat()
-            setTextColor(Color.rgb(28, 42, 39))
-            setPadding(0, dp(12), 0, dp(8))
-            if (bold) typeface = Typeface.DEFAULT_BOLD
-            content.addView(this)
-        }
-    private fun button(value: String, description: String = value, action: () -> Unit): Button =
-        Button(this).apply {
-            text = value
-            contentDescription = description
-            isAllCaps = false
-            minHeight = dp(48)
-            gravity = Gravity.CENTER
-            setOnClickListener { action() }
-            content.addView(this, LinearLayout.LayoutParams(-1, -2))
-        }
+    private fun showList() {
+        message = if (writer.phase == WritePhase.WRITING) "書込みを中断しました。タグの内容を確認してください" else ""
+        writer.cancel()
+        selected = null
+        render()
+    }
+    private fun panel(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = surface(R.color.surface)
+        setPadding(dp(8), dp(8), dp(8), dp(8))
+        content.addView(this, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+    }
+    private fun surface(color: Int) = GradientDrawable().apply {
+        setColor(getColor(color))
+        cornerRadius = dp(8).toFloat()
+        if (color == R.color.surface) setStroke(dp(1), getColor(R.color.border))
+    }
+    private fun label(value: String, size: Int, bold: Boolean = false, muted: Boolean = false,
+                      parent: LinearLayout = content): TextView = TextView(this).apply {
+        text = value
+        textSize = size.toFloat()
+        setTextColor(getColor(if (muted) R.color.muted else R.color.text))
+        val spacing = dp(if (parent == content) 8 else 4)
+        setPadding(if (parent == content) 0 else dp(12), spacing, 0, spacing)
+        if (bold) typeface = Typeface.DEFAULT_BOLD
+        parent.addView(this)
+    }
+    private fun button(value: String, description: String = value, primary: Boolean = false,
+                       parent: LinearLayout = content, action: () -> Unit): Button = Button(this).apply {
+        text = value
+        textSize = 16f
+        contentDescription = description
+        isAllCaps = false
+        setSingleLine(false)
+        minHeight = dp(48)
+        gravity = Gravity.CENTER
+        stateListAnimator = null
+        background = RippleDrawable(ColorStateList.valueOf(getColor(R.color.border)),
+            if (parent == content) surface(if (primary) R.color.accent else R.color.surface) else null, null)
+        setTextColor(ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+            intArrayOf(getColor(R.color.muted), getColor(if (primary) R.color.on_accent else R.color.text))))
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        setOnClickListener { action() }
+        parent.addView(this, LinearLayout.LayoutParams(-1, -2).apply { topMargin = if (parent == content) dp(8) else 0 })
+    }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
