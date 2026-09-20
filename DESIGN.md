@@ -1,8 +1,9 @@
 # SoundTag
 
 自分のPixelで、許可したスピーカーだけをNFCタグから操作する。
-共通デザイン原本「rust-svelte-template / DESIGN.md」のSumi/Kinari・情報密度・操作規約を
-2026-09-19にAndroid標準Viewへ適用した。この文書が製品の画面設計の正本。
+共通デザイン原本は「rust-svelte-template / DESIGN.md」。
+そのSumi/Kinari・情報密度・操作規約を2026-09-19にAndroid標準Viewへ適用した。
+製品の画面設計はこの文書で定義する。
 
 ## 設定と書込み
 

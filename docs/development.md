@@ -132,8 +132,8 @@ fakeの成功は、実タグの読書き、実Bluetooth接続、音声出力の�
 | `soundtag://phone` | 許可済みの機器を全切断 |
 | `soundtag://disconnect/00:11:22:33:44:AA` | 指定機器の切断。旧タグの受信互換用 |
 
-新規書込みは接続・全切断の2種類です。形式の正本は
-[TagCommand](../app/src/main/java/dev/miyabisun/soundtag/TagCommand.kt)にあります。
+新規書込みは接続・全切断の2種類です。タグ形式は
+[TagCommand](../app/src/main/java/dev/miyabisun/soundtag/TagCommand.kt)で定義しています。
 
 [NfcActivity](../app/src/main/java/dev/miyabisun/soundtag/NfcActivity.kt)は画面なしでURIを受信し、
 [NfcService](../app/src/main/java/dev/miyabisun/soundtag/NfcService.kt)へ渡して終了します。
