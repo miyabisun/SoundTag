@@ -142,6 +142,7 @@ class MainActivity : Activity() {
             label("Bluetoothへのアクセスが必要です", 16)
             permissionButton()
             notificationButton()
+            recoveryButton()
             return
         }
         if (!state.bluetoothEnabled) {
@@ -210,6 +211,19 @@ class MainActivity : Activity() {
             setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_phone, 0, 0, 0)
         }
         notificationButton()
+        recoveryButton()
+    }
+
+    private fun recoveryButton() {
+        label("YouTubeの画面復帰", 22, true)
+        label(if (YouTubeRecovery.enabled(this)) "ON・再生中のYouTubeへタグ操作後に戻ります"
+            else "OFF・タグ操作で小窓になるYouTubeを元の画面へ", 14, muted = true)
+        label("再生状態の確認に「通知へのアクセス」を使います。通知の本文は読み取り・保存しません。", 14, muted = true)
+        button("画面復帰を設定") {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                    YouTubeRecovery.component(this).flattenToString()))
+        }
     }
 
     private fun notificationButton() {

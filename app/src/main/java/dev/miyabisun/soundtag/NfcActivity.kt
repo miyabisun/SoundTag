@@ -12,12 +12,13 @@ class NfcActivity : Activity() {
         try {
             if (savedInstanceState == null && intent.action == NfcAdapter.ACTION_NDEF_DISCOVERED &&
                 intent.dataString?.let(TagCommand::parse) != null) {
+                YouTubeRecovery.schedule(this)
                 startForegroundService(Intent(this, NfcService::class.java).setData(intent.data))
             }
         } catch (_: IllegalStateException) {
-            // Android declined background execution; no connection changed and no UI is opened.
+            // Android declined background Bluetooth execution; do not open settings.
         } catch (_: SecurityException) {
-            // Revoked OS permissions must never replace the user's current screen.
+            // Revoked Bluetooth permissions must not open a permission screen from a tag.
         } finally {
             finish()
         }

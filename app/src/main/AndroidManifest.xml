@@ -30,5 +30,15 @@
         </activity>
         <service android:name=".NfcService" android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+        <service android:name=".YouTubeAccessService" android:exported="true"
+            android:label="YouTubeの画面復帰"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+            <meta-data android:name="android.service.notification.default_filter_types" android:value="" />
+            <meta-data android:name="android.service.notification.disabled_filter_types"
+                android:value="conversations|alerting|ongoing|silent" />
+        </service>
     </application>
 </manifest>
