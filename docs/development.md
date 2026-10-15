@@ -72,6 +72,8 @@ adb -s DEVICE_SERIAL shell am start -n dev.miyabisun.soundtag/.MainActivity
 JVMテストはURI解析、機器の許可、接続順序、取消し、タイムアウト、NDEF生成をfakeで検証します。
 Android instrumentationは実画面部品を操作し、Bluetoothとタグ書込みの境界をfakeに置き換えます。
 通知、別アプリ表示、書込みの失敗・再試行、設定画面の明暗・長名・スクロールを扱います。
+ウィジェットの試験は、ランチャーの追加確認を自動で承認して実際のホーム画面へ配置し、
+タップでの切替・表示更新・最小サイズでのスクロールを確認します。エミュレータはPixel Launcherを使ってください。
 
 ```sh
 sdkmanager 'emulator' 'system-images;android-37.0;google_apis;x86_64'
@@ -137,6 +139,7 @@ fakeの成功は、実タグの読書き、実Bluetooth接続、音声出力の�
 
 [NfcActivity](../app/src/main/java/dev/miyabisun/soundtag/NfcActivity.kt)は画面なしでURIを受信し、
 [NfcService](../app/src/main/java/dev/miyabisun/soundtag/NfcService.kt)へ渡して終了します。
+[SpeakerWidget](../app/src/main/java/dev/miyabisun/soundtag/SpeakerWidget.kt)のタップも同じURIをNfcServiceへ渡します。
 [SwitchController](../app/src/main/java/dev/miyabisun/soundtag/SwitchController.kt)が許可と状態を確認し、
 対象外の許可済み機器の切断、対象への接続を順に進めます。
 APIの受付だけでは成功とせず、A2DP／LE Audioの接続状態とACLの終了を確認します。

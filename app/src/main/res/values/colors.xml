@@ -8,5 +8,6 @@
     <color name="on_accent">#ffffff</color>
     <color name="danger">#9c2b1d</color>
     <color name="on_danger">#ffffff</color>
+    <color name="connected">@color/accent</color>
     <bool name="light_bars">true</bool>
 </resources>

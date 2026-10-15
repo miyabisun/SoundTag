@@ -56,6 +56,7 @@ class NfcService : Service() {
 internal class NfcSession(context: Context, factory: ((Context, () -> Unit) -> BluetoothAccess)?) {
     private val settings = AndroidSettings(context)
     private val notices = OperationNotifications(context)
+    private val refreshWidget = { SpeakerWidget.update(context) }
     private val bluetooth = factory?.invoke(context) { tick() } ?: AndroidBluetooth(context, settings) { tick() }
     val controller = SwitchController(bluetooth)
     private val handler = Handler(Looper.getMainLooper())
@@ -92,6 +93,7 @@ internal class NfcSession(context: Context, factory: ((Context, () -> Unit) -> B
                 notices.result(state, name)
                 delivered = true
             }
+            refreshWidget()
         }
         updated()
         if (!controller.hasPendingWork) close()

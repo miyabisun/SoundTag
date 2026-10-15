@@ -11,6 +11,7 @@ import android.content.IntentFilter
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
@@ -38,13 +39,16 @@ class MainActivity : Activity() {
     private lateinit var nfc: NfcWriting
     private lateinit var writer: TagWriter
     private lateinit var scroll: ScrollView
-    private var renderedSelection: TagCommand? = null
-    private val backToSpeakers = OnBackInvokedCallback { showList() }
+    private val backToSpeakers = OnBackInvokedCallback { collapse() }
     private var selected: TagCommand? = null
     private var message = ""
+    private var revealSelection = false
     private var registered = false
     private val changes = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) { render() }
+        override fun onReceive(context: Context, intent: Intent) {
+            SpeakerWidget.update(context)
+            render()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,6 +76,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        SpeakerWidget.update(this)
         if (::controller.isInitialized) render()
     }
     override fun onPause() {
@@ -85,6 +90,7 @@ class MainActivity : Activity() {
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        SpeakerWidget.update(this)
         render()
     }
     override fun onDestroy() {
@@ -97,10 +103,7 @@ class MainActivity : Activity() {
     }
 
     private fun render() {
-        val position = if (::scroll.isInitialized && renderedSelection == selected) scroll.scrollY else 0
-        renderedSelection = selected
-        if (selected == null) onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backToSpeakers)
-        else onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backToSpeakers)
+        val position = if (::scroll.isInitialized) scroll.scrollY else 0
         scroll = ScrollView(this).apply {
             setBackgroundColor(getColor(R.color.background))
             setOnApplyWindowInsetsListener { view, insets ->
@@ -117,118 +120,145 @@ class MainActivity : Activity() {
         scroll.addView(content)
         setContentView(scroll)
         content.requestFocus()
-        label("SoundTag", 28, true)
+        var opened: View? = null
         try {
-            if (selected != null) showWriter(checkNotNull(selected)) else showSpeakers()
+            opened = showSpeakers()
         } catch (_: SecurityException) {
             message = "権限を確認してください"
             permissionButton()
+            showMessage()
         } catch (_: IllegalStateException) {
             message = "設定を保存できませんでした"
+            showMessage()
         }
-        if (message.isNotEmpty()) label(message, 16).apply {
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            setTextColor(getColor(R.color.accent))
-        }
+        // Back closes the open card; with every card closed it follows the OS.
+        if (opened == null) onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backToSpeakers)
+        else onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backToSpeakers)
+        val reveal = revealSelection
+        revealSelection = false
         scroll.requestApplyInsets()
-        scroll.apply { post { scrollTo(0, position) } }
+        scroll.post {
+            scroll.scrollTo(0, position)
+            if (reveal) opened?.let { it.requestRectangleOnScreen(Rect(0, 0, it.width, it.height), false) }
+        }
     }
 
-    private fun showSpeakers() {
-        label("接続タグ", 22, true)
-        label("許可した機器を選んでタグを作成", 14, muted = true)
+    /** Returns the open card so a newly opened accordion can be scrolled into view. */
+    private fun showSpeakers(): View? {
         val state = controller.snapshot()
         if (!state.permission) {
-            label("Bluetoothへのアクセスが必要です", 16)
+            reason("Bluetoothへのアクセスが必要です")
             permissionButton()
-            notificationButton()
-            recoveryButton()
-            return
+            showMessage()
+            footer()
+            return null
         }
         if (!state.bluetoothEnabled) {
-            label("BluetoothがOFFです", 16)
+            reason("BluetoothがOFFです")
             button("Bluetoothを開く") { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
         }
         if (state.speakers.isEmpty()) {
-            label("ペアリング済みの機器がありません", 16)
+            reason("ペアリング済みの機器がありません")
             button("機器をペアリング") { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
         }
+        var opened: View? = null
         state.speakers.forEach { row ->
-            val panel = panel()
-            button(row.speaker.name, "${row.speaker.name}に接続するタグ", parent = panel) {
-                selected = TagCommand.Connect(row.speaker.address)
-                message = ""
-                render()
-            }.apply {
-                isEnabled = row.allowed
-                gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                textSize = 18f
-                typeface = Typeface.DEFAULT_BOLD
-                setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, R.drawable.ic_next, 0)
+            val command = TagCommand.Connect(row.speaker.address)
+            card(command, row.speaker.name, connectorIcon(row.speaker.connected), connectionDescription(row.speaker),
+                openable = true, writable = row.allowed) { allowSwitch(row, state) }?.let { opened = it }
+        }
+        val anyAllowed = state.speakers.any { it.allowed }
+        card(TagCommand.Phone, getString(R.string.disconnect_all), R.drawable.ic_phone,
+            getString(R.string.disconnect_all), openable = anyAllowed, writable = anyAllowed)?.let { opened = it }
+        showMessage()
+        footer()
+        return opened
+    }
+
+    /**
+     * One accordion card; returns it when it is the open one. A speaker card always opens for its
+     * allow switch (initial setup), but only allowed targets get the tag writer.
+     */
+    private fun card(command: TagCommand, name: String, icon: Int, description: String, openable: Boolean,
+                     writable: Boolean, setup: (() -> Switch)? = null): View? {
+        val open = openable && selected == command
+        val panel = panel()
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(56)
+            setPadding(dp(12), dp(4), dp(4), dp(4))
+            contentDescription = description
+            isEnabled = openable
+            if (openable) {
+                stateDescription = if (open) "開いています" else "閉じています"
+                background = RippleDrawable(ColorStateList.valueOf(getColor(R.color.border)), null, null)
+                setOnClickListener { if (open) collapse() else expand(command) }
             }
-            label(if (row.speaker.connected) "接続中" else "未接続", 14, parent = panel)
-                .setTextColor(getColor(if (row.speaker.connected) R.color.accent else R.color.muted))
-            val toggle = Switch(this).apply {
-                text = "自動操作を許可"
-                textSize = 16f
-                setTextColor(getColor(R.color.text))
-                setPadding(dp(12), 0, dp(12), 0)
-                contentDescription = "${row.speaker.name}の自動操作を許可"
-                minHeight = dp(48)
-                isChecked = row.allowed
-                isEnabled = state.bluetoothEnabled || row.allowed
-                setOnCheckedChangeListener { _, enabled ->
-                    message = if (enabled) "機器の確認中…" else ""
-                    try {
-                        controller.setAllowed(row.speaker.address, enabled) { result ->
-                            if (!isDestroyed) {
-                                message = when (result) {
-                                    SettingsResult.SAVED -> if (enabled) "許可しました" else "許可を解除しました"
-                                    SettingsResult.PERMISSION_REQUIRED -> "権限を確認してください"
-                                    SettingsResult.BLUETOOTH_OFF -> "BluetoothがOFFです"
-                                    SettingsResult.UNKNOWN_DEVICE -> "機器を選び直してください"
-                                    SettingsResult.ASSOCIATION_FAILED -> "機器の確認ができませんでした"
-                                }
-                                render()
+        }
+        header.addView(ImageView(this).apply {
+            setImageResource(icon)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(dp(24), dp(24)))
+        header.addView(TextView(this).apply {
+            text = name
+            textSize = 18f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(getColor(if (writable) R.color.text else R.color.muted))
+            setPadding(dp(12), dp(8), dp(8), dp(8))
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_next)
+            rotation = if (open) -90f else 90f
+            visibility = if (openable) View.VISIBLE else View.INVISIBLE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        panel.addView(header, LinearLayout.LayoutParams(-1, -2))
+        if (open) {
+            setup?.let { panel.addView(it(), LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END; marginEnd = dp(8) }) }
+            if (writable) writer(command, panel)
+        }
+        return panel.takeIf { open }
+    }
+
+    private fun allowSwitch(row: SpeakerSetting, state: SettingsSnapshot) = Switch(this).apply {
+        contentDescription = "${row.speaker.name}の自動操作を許可"
+        minHeight = dp(48)
+        minWidth = dp(48)
+        isChecked = row.allowed
+        isEnabled = state.bluetoothEnabled || row.allowed
+        setOnCheckedChangeListener { _, enabled ->
+            val aborted = !enabled && writer.phase == WritePhase.WRITING
+            message = if (enabled) "機器の確認中…" else ""
+            if (!enabled) writer.cancel()
+            try {
+                controller.setAllowed(row.speaker.address, enabled) { result ->
+                    if (!isDestroyed) {
+                        message = when (result) {
+                            SettingsResult.SAVED -> when {
+                                enabled -> "許可しました"
+                                aborted -> "書込みを中断しました。タグの内容を確認してください"
+                                else -> "許可を解除しました"
                             }
+                            SettingsResult.PERMISSION_REQUIRED -> "権限を確認してください"
+                            SettingsResult.BLUETOOTH_OFF -> "BluetoothがOFFです"
+                            SettingsResult.UNKNOWN_DEVICE -> "機器を選び直してください"
+                            SettingsResult.ASSOCIATION_FAILED -> "機器の確認ができませんでした"
                         }
-                    } catch (_: RuntimeException) {
-                        message = "設定を変更できませんでした"
+                        SpeakerWidget.update(this@MainActivity)
                         render()
                     }
                 }
+            } catch (_: RuntimeException) {
+                message = "設定を変更できませんでした"
+                render()
             }
-            panel.addView(toggle, LinearLayout.LayoutParams(-1, -2))
-        }
-        label("切断タグ", 22, true)
-        label("自動操作を許可した機器だけをまとめて切断", 14, muted = true)
-        button("全て切断", "許可した全ての機器を切断するタグ") {
-            selected = TagCommand.Phone
-            message = ""
-            render()
-        }.apply {
-            isEnabled = state.speakers.any { it.allowed }
-            setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_phone, 0, 0, 0)
-        }
-        notificationButton()
-        recoveryButton()
-    }
-
-    private fun recoveryButton() {
-        label("YouTubeの画面復帰", 22, true)
-        label(if (YouTubeRecovery.enabled(this)) "ON・再生中のYouTubeへタグ操作後に戻ります"
-            else "OFF・タグ操作で小窓になるYouTubeを元の画面へ", 14, muted = true)
-        label("再生状態の確認に「通知へのアクセス」を使います。通知の本文は読み取り・保存しません。", 14, muted = true)
-        button("画面復帰を設定") {
-            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
-                .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
-                    YouTubeRecovery.component(this).flattenToString()))
         }
     }
 
-    private fun notificationButton() {
-        label(if (OperationNotifications(this).resultsEnabled()) "通知は接続状態が変わったときだけ" else "接続状態の通知がOFFです", 14, muted = true)
-        button("通知を設定") {
+    private fun footer() {
+        button("通知の設定") {
             val preferences = getPreferences(MODE_PRIVATE)
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
                 (!preferences.getBoolean("notificationsAsked", false) ||
@@ -239,14 +269,16 @@ class MainActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                     .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
             }
+        }.apply { topMargin(24) }
+        button("通知へのアクセス") {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                    YouTubeRecovery.component(this).flattenToString()))
         }
     }
 
-    private fun showWriter(command: TagCommand) {
+    private fun writer(command: TagCommand, panel: LinearLayout) {
         val state = writer.phase
-        val name = controller.snapshot().speakers.firstOrNull { it.speaker.address == command.target }?.speaker?.name
-        label(if (command == TagCommand.Phone) "全て切断" else "特定の機器の接続", 22, true)
-        label(name ?: "自動操作を許可した機器だけ", 18)
         val text = writer.failure?.let { failure -> when (failure) {
             WriteFailure.UNAVAILABLE -> "この端末はNFCに対応していません"
             WriteFailure.DISABLED -> "NFCがOFFです"
@@ -257,48 +289,61 @@ class MainActivity : Activity() {
             WriteFailure.IO -> "書込みを確認できませんでした"
             WriteFailure.NOT_ALLOWED -> "機器の自動操作を許可してください"
         } } ?: when (state) {
-            WritePhase.IDLE -> "操作をタグに保存"
+            WritePhase.IDLE -> "タグの内容を上書きします"
             WritePhase.WAITING -> "タグをかざしてください"
             WritePhase.WRITING -> "書込み中…"
             WritePhase.SUCCEEDED -> "書き込みました"
             WritePhase.FAILED -> "書込みできませんでした"
         }
-        val panel = panel()
-        panel.addView(ImageView(this).apply {
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(4), dp(8), dp(8))
+            panel.addView(this, LinearLayout.LayoutParams(-1, -2))
+        }
+        val status = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            body.addView(this, LinearLayout.LayoutParams(-1, -2))
+        }
+        status.addView(ImageView(this).apply {
             setImageResource(when (state) {
                 WritePhase.SUCCEEDED -> R.drawable.ic_success
                 WritePhase.FAILED -> R.drawable.ic_error
                 else -> R.drawable.ic_tag
             })
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(64), dp(64)).apply { gravity = Gravity.CENTER_HORIZONTAL })
-        label(text, 22, true, parent = panel).apply {
-            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        status.addView(TextView(this).apply {
+            this.text = text
+            textSize = 18f
+            typeface = Typeface.DEFAULT_BOLD
             setTextColor(getColor(if (state == WritePhase.FAILED) R.color.danger else R.color.text))
+            setPadding(dp(12), dp(8), 0, dp(8))
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }
-        if (state == WritePhase.IDLE || state == WritePhase.FAILED) {
-            label("タグの内容を上書きします", 16)
-            button(if (state == WritePhase.IDLE) "タグに書き込む" else "もう一度書き込む", primary = true) {
-                message = ""
-                writer.start(command)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        when (state) {
+            WritePhase.IDLE, WritePhase.FAILED -> {
+                if (state == WritePhase.FAILED) label("タグの内容を上書きします", parent = body)
+                button(if (state == WritePhase.IDLE) "タグに書き込む" else "もう一度書き込む", primary = true, parent = body) {
+                    message = ""
+                    writer.start(command)
+                }
+                if (writer.failure == WriteFailure.DISABLED) {
+                    button("NFCを開く", parent = body) { startActivity(Intent(Settings.ACTION_NFC_SETTINGS)) }
+                }
             }
-            if (writer.failure == WriteFailure.DISABLED) {
-                button("NFCを開く") { startActivity(Intent(Settings.ACTION_NFC_SETTINGS)) }
+            WritePhase.WAITING, WritePhase.WRITING -> {
+                label("タグを端末の背面に近づけてください", parent = body)
+                button("中止", parent = body) {
+                    message = if (writer.phase == WritePhase.WRITING) "タグの内容を確認してください" else ""
+                    writer.cancel()
+                    render()
+                }
             }
-        }
-        if (state == WritePhase.WAITING || state == WritePhase.WRITING) {
-            label("タグを端末の背面に近づけてください", 16)
-            button("中止") {
-                message = if (writer.phase == WritePhase.WRITING) "タグの内容を確認してください" else ""
-                writer.cancel()
-                render()
+            WritePhase.SUCCEEDED -> {
+                label("タグを離してから閉じてください", parent = body)
+                button("閉じる", parent = body) { collapse() }
             }
-        } else if (state == WritePhase.IDLE) {
-            button("スピーカー一覧") { showList() }
-        } else {
-            label("タグを離してから戻ってください", 16)
-            button("タグを離して戻る") { showList() }
         }
     }
 
@@ -312,11 +357,27 @@ class MainActivity : Activity() {
             }
         }
     }
-    private fun showList() {
+    private fun expand(command: TagCommand) {
+        collapse(rerender = false)
+        selected = command
+        revealSelection = true
+        render()
+    }
+    private fun collapse(rerender: Boolean = true) {
         message = if (writer.phase == WritePhase.WRITING) "書込みを中断しました。タグの内容を確認してください" else ""
         writer.cancel()
         selected = null
-        render()
+        if (rerender) render()
+    }
+    private fun reason(value: String) = label(value)
+    private fun showMessage() {
+        if (message.isNotEmpty()) label(message).apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            setTextColor(getColor(R.color.accent))
+        }
+    }
+    private fun View.topMargin(value: Int) {
+        (layoutParams as LinearLayout.LayoutParams).topMargin = dp(value)
     }
     private fun panel(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -329,14 +390,11 @@ class MainActivity : Activity() {
         cornerRadius = dp(8).toFloat()
         if (color == R.color.surface) setStroke(dp(1), getColor(R.color.border))
     }
-    private fun label(value: String, size: Int, bold: Boolean = false, muted: Boolean = false,
-                      parent: LinearLayout = content): TextView = TextView(this).apply {
+    private fun label(value: String, parent: LinearLayout = content): TextView = TextView(this).apply {
         text = value
-        textSize = size.toFloat()
-        setTextColor(getColor(if (muted) R.color.muted else R.color.text))
-        val spacing = dp(if (parent == content) 8 else 4)
-        setPadding(if (parent == content) 0 else dp(12), spacing, 0, spacing)
-        if (bold) typeface = Typeface.DEFAULT_BOLD
+        textSize = 16f
+        setTextColor(getColor(R.color.text))
+        setPadding(0, dp(8), 0, dp(8))
         parent.addView(this)
     }
     private fun button(value: String, description: String = value, primary: Boolean = false,
@@ -350,12 +408,12 @@ class MainActivity : Activity() {
         gravity = Gravity.CENTER
         stateListAnimator = null
         background = RippleDrawable(ColorStateList.valueOf(getColor(R.color.border)),
-            if (parent == content) surface(if (primary) R.color.accent else R.color.surface) else null, null)
+            surface(if (primary) R.color.accent else R.color.surface), null)
         setTextColor(ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
             intArrayOf(getColor(R.color.muted), getColor(if (primary) R.color.on_accent else R.color.text))))
         setPadding(dp(12), dp(12), dp(12), dp(12))
         setOnClickListener { action() }
-        parent.addView(this, LinearLayout.LayoutParams(-1, -2).apply { topMargin = if (parent == content) dp(8) else 0 })
+        parent.addView(this, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }

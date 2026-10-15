@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">SoundTag</string>
+    <string name="disconnect_all">全て切断</string>
+    <string name="widget_open">SoundTagを開く</string>
+    <string name="widget_description">許可した機器への切替と全て切断</string>
 </resources>

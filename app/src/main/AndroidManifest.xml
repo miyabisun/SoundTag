@@ -28,6 +28,15 @@
                 <data android:scheme="soundtag" android:host="phone" />
             </intent-filter>
         </activity>
+        <receiver android:name=".SpeakerWidget" android:exported="true" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+                <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/speaker_widget" />
+        </receiver>
         <service android:name=".NfcService" android:exported="false"
             android:foregroundServiceType="connectedDevice" />
         <service android:name=".YouTubeAccessService" android:exported="true"

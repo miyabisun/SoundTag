@@ -24,7 +24,7 @@ import org.json.JSONObject
 class SettingsScreenTest {
     private val address = "00:11:22:33:44:AA"
 
-    @Test fun allowedSpeakerAndAllDisconnectAreWrittenThenReceivedWithoutClipboard() {
+    @Test fun allowedSpeakerAndAllDisconnectAreWrittenInsideOneOpenCardThenReceived() {
         val fake = WriterSettings(address)
         val nfc = ScreenNfc()
         val bluetooth = object : BluetoothAccess {
@@ -42,40 +42,53 @@ class SettingsScreenTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use { screen ->
                 screen.onActivity { activity ->
-                    descendants(activity.window.decorView).filterIsInstance<Switch>().single().performClick()
+                    val root = activity.window.decorView
+                    assertFalse(header(root, "全て切断").isEnabled)
+                    assertTrue(descendants(root).filterIsInstance<Switch>().isEmpty())
+                    open(root, "デスクのスピーカー")
+                    assertTrue("Not allowed: no writer", buttons(root, "タグに書き込む").isEmpty())
+                    descendants(root).filterIsInstance<Switch>().single().performClick()
                     assertEquals(setOf(address), fake.saved)
-                    click(activity.window.decorView, "デスクのスピーカー")
-                    assertLabel(activity.window.decorView, "特定の機器の接続")
+                    assertLabel(root, "タグの内容を上書きします")
                     assertTrue(nfc.messages.isEmpty())
                     assertTrue(bluetooth.calls.isEmpty())
-                    click(activity.window.decorView, "タグに書き込む")
-                    assertLabel(activity.window.decorView, "タグをかざしてください")
+                    open(root, "全て切断")
+                    assertEquals("Only one card is open", 1, buttons(root, "タグに書き込む").size)
+                    assertEquals("開いています", header(root, "全て切断").stateDescription)
+                    assertEquals("閉じています", header(root, "デスクのスピーカー").stateDescription)
+                    open(root, "デスクのスピーカー")
+                    click(root, "タグに書き込む")
+                    assertLabel(root, "タグをかざしてください")
                 }
                 screenshot("writer-waiting")
                 screen.onActivity { activity ->
+                    val root = activity.window.decorView
                     nfc.detected()
-                    assertLabel(activity.window.decorView, "書込み中…")
+                    assertLabel(root, "書込み中…")
                     nfc.complete(null)
-                    assertLabel(activity.window.decorView, "書き込みました")
+                    assertLabel(root, "書き込みました")
                     assertTrue(bluetooth.calls.isEmpty())
                 }
                 screenshot("writer-success")
                 screen.onActivity { activity ->
-                    click(activity.window.decorView, "タグを離して戻る")
-                    assertLabel(activity.window.decorView, "デスクのスピーカー")
-                    click(activity.window.decorView, "全て切断")
-                    click(activity.window.decorView, "タグに書き込む")
+                    val root = activity.window.decorView
+                    click(root, "閉じる")
+                    assertTrue(buttons(root, "閉じる").isEmpty())
+                    open(root, "全て切断")
+                    click(root, "タグに書き込む")
                     nfc.detected()
                     nfc.complete(WriteFailure.READ_ONLY)
-                    assertLabel(activity.window.decorView, "このタグは書込みできません")
+                    assertLabel(root, "このタグは書込みできません")
                 }
                 screenshot("writer-failure")
                 screen.onActivity { activity ->
-                    click(activity.window.decorView, "もう一度書き込む")
+                    val root = activity.window.decorView
+                    click(root, "もう一度書き込む")
                     nfc.detected()
                     nfc.complete(null)
-                    assertLabel(activity.window.decorView, "書き込みました")
-                    click(activity.window.decorView, "タグを離して戻る")
+                    assertLabel(root, "書き込みました")
+                    open(root, "全て切断")
+                    assertTrue(buttons(root, "閉じる").isEmpty())
                 }
             }
             val codes = nfc.messages.map { message ->
@@ -96,10 +109,17 @@ class SettingsScreenTest {
 
             ActivityScenario.launch(MainActivity::class.java).use { screen ->
                 screen.onActivity { activity ->
-                    descendants(activity.window.decorView).filterIsInstance<Switch>().single().performClick()
+                    val root = activity.window.decorView
+                    open(root, "デスクのスピーカー")
+                    click(root, "タグに書き込む")
+                    val old = nfc.detected
+                    descendants(root).filterIsInstance<Switch>().single().performClick()
                     assertTrue(fake.saved.isEmpty())
-                    assertFalse(descendants(activity.window.decorView).filterIsInstance<Button>()
-                        .first { it.text.toString() == "デスクのスピーカー" }.isEnabled)
+                    old()
+                    assertEquals(3, nfc.messages.size)
+                    assertTrue(buttons(activity.window.decorView, "タグに書き込む").isEmpty())
+                    assertEquals(1, descendants(activity.window.decorView).filterIsInstance<Switch>().size)
+                    assertLabel(activity.window.decorView, "許可を解除しました")
                 }
             }
         } finally {
@@ -117,7 +137,7 @@ class SettingsScreenTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use { screen ->
                 screen.onActivity { activity ->
-                    click(activity.window.decorView, "全て切断")
+                    open(activity.window.decorView, "全て切断")
                     click(activity.window.decorView, "タグに書き込む")
                 }
                 val old = nfc.detected
@@ -129,6 +149,7 @@ class SettingsScreenTest {
                     nfc.startFailure = WriteFailure.DISABLED
                     click(activity.window.decorView, "タグに書き込む")
                     assertLabel(activity.window.decorView, "NFCがOFFです")
+                    assertLabel(activity.window.decorView, "NFCを開く")
                 }
                 screenshot("writer-nfc-off")
             }
@@ -154,14 +175,18 @@ class SettingsScreenTest {
                 shell("cmd uimode night $mode")
                 ActivityScenario.launch(MainActivity::class.java).use { screen ->
                     screen.onActivity { activity ->
-                        val views = descendants(activity.window.decorView)
+                        val root = activity.window.decorView
+                        val views = descendants(root)
                         backgrounds += (views.filterIsInstance<ScrollView>().single().background as ColorDrawable).color
-                        assertLabel(activity.window.decorView, "接続中")
-                        assertEquals(3, views.filterIsInstance<Switch>().size)
-                        assertEquals("デスクのスピーカー", views.filterIsInstance<Button>().first().text.toString())
+                        assertTrue(views.filterIsInstance<Switch>().isEmpty())
+                        assertEquals(listOf("デスクのスピーカー", "お風呂で使う防水スピーカー — Bose Flex SoundLink", "リビング",
+                            "全て切断", "通知の設定", "通知へのアクセス"),
+                            views.filterIsInstance<TextView>().filter { it !is Switch }.map { it.text.toString() })
+                        assertEquals("デスクのスピーカー、接続中", header(root, "デスクのスピーカー").contentDescription)
+                        assertEquals("リビング、未接続", header(root, "リビング").contentDescription)
                     }
                     capture(screen, "settings-$mode")
-                    screen.onActivity { activity -> click(activity.window.decorView, "デスクのスピーカー") }
+                    screen.onActivity { activity -> open(activity.window.decorView, "デスクのスピーカー") }
                     capture(screen, "preview-$mode")
                     screen.onActivity { activity -> click(activity.window.decorView, "タグに書き込む") }
                     capture(screen, "waiting-$mode")
@@ -177,8 +202,8 @@ class SettingsScreenTest {
                     }
                     capture(screen, "success-$mode")
                     screen.onActivity { activity ->
-                        click(activity.window.decorView, "タグを離して戻る")
-                        assertLabel(activity.window.decorView, "デスクのスピーカー")
+                        click(activity.window.decorView, "閉じる")
+                        assertTrue(buttons(activity.window.decorView, "タグに書き込む").isEmpty())
                     }
                 }
             }
@@ -186,24 +211,41 @@ class SettingsScreenTest {
             val writesBeforeBack = nfc.messages.size
             ActivityScenario.launch(MainActivity::class.java).use { screen ->
                 var position = 0
+                screen.onActivity { activity -> open(activity.window.decorView, "リビング") }
+                InstrumentationRegistry.getInstrumentation().waitForIdleSync()
                 screen.onActivity { activity ->
                     val scroll = descendants(activity.window.decorView).filterIsInstance<ScrollView>().single()
                     scroll.scrollTo(0, 200)
                     position = scroll.scrollY
-                    descendants(activity.window.decorView).filterIsInstance<Switch>().last().performClick()
+                    descendants(activity.window.decorView).filterIsInstance<Switch>().single().performClick()
                 }
                 InstrumentationRegistry.getInstrumentation().waitForIdleSync()
                 screen.onActivity { activity ->
-                    assertEquals(position, descendants(activity.window.decorView).filterIsInstance<ScrollView>().single().scrollY)
-                    click(activity.window.decorView, "全て切断")
-                    click(activity.window.decorView, "タグに書き込む")
+                    val root = activity.window.decorView
+                    assertEquals(position, descendants(root).filterIsInstance<ScrollView>().single().scrollY)
+                    open(root, "全て切断")
+                    click(root, "タグに書き込む")
+                    click(root, "中止")
+                    assertLabel(root, "タグに書き込む")
+                    click(root, "タグに書き込む")
                 }
-                val old = nfc.detected
+                var old = nfc.detected
                 shell("input keyevent KEYCODE_BACK")
                 screen.onActivity { activity ->
                     old()
                     assertEquals(writesBeforeBack, nfc.messages.size)
-                    assertLabel(activity.window.decorView, "デスクのスピーカー")
+                    assertTrue(buttons(activity.window.decorView, "中止").isEmpty())
+                    assertEquals("閉じています", header(activity.window.decorView, "全て切断").stateDescription)
+                    open(activity.window.decorView, "全て切断")
+                    click(activity.window.decorView, "タグに書き込む")
+                    old = nfc.detected
+                    nfc.detected()
+                    open(activity.window.decorView, "全て切断")
+                    nfc.complete(null)
+                    old()
+                    assertEquals(writesBeforeBack + 1, nfc.messages.size)
+                    assertLabel(activity.window.decorView, "書込みを中断しました。タグの内容を確認してください")
+                    assertTrue(buttons(activity.window.decorView, "閉じる").isEmpty())
                 }
             }
         } finally {
@@ -227,8 +269,7 @@ class SettingsScreenTest {
                 ActivityScenario.launch(MainActivity::class.java).use { screen ->
                     screen.onActivity { activity ->
                         assertLabel(activity.window.decorView, "ペアリング済みの機器がありません")
-                        assertFalse(descendants(activity.window.decorView).filterIsInstance<Button>()
-                            .first { it.text.toString() == "全て切断" }.isEnabled)
+                        assertFalse(header(activity.window.decorView, "全て切断").isEnabled)
                     }
                     capture(screen, "empty-$mode")
                     fake.enabled = false
@@ -252,13 +293,19 @@ class SettingsScreenTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         screen.onActivity { activity ->
             val views = descendants(activity.window.decorView)
-            assertEquals("Screen opens at top", 0, views.filterIsInstance<ScrollView>().single().scrollY)
+            if (!name.startsWith("preview") && !name.startsWith("waiting") && !name.startsWith("failure") &&
+                !name.startsWith("success")) {
+                assertEquals("Screen opens at top", 0, views.filterIsInstance<ScrollView>().single().scrollY)
+            }
+            for (header in views.filter { it.hasOnClickListeners() && it !is TextView }) {
+                assertTrue("Small header", header.height >= (48 * activity.resources.displayMetrics.density).toInt())
+            }
             val metrics = JSONArray()
             for (view in views.filterIsInstance<TextView>()) {
                 val layout = view.layout ?: continue
                 for (line in 0 until layout.lineCount) {
                     assertEquals("Ellipsis: ${view.text}", 0, layout.getEllipsisCount(line))
-                    assertTrue("Clipped: ${view.text}", layout.getLineWidth(line) <=
+                    assertTrue("Clipped: ${view.text} line=$line ${layout.getLineWidth(line)} width=${view.width} pad=${view.compoundPaddingLeft}+${view.compoundPaddingRight} text=${view.text.subSequence(layout.getLineStart(line), layout.getLineEnd(line))}", layout.getLineWidth(line) <=
                         view.width - view.compoundPaddingLeft - view.compoundPaddingRight + 1)
                 }
                 if (view is Button || view is Switch) {
@@ -297,8 +344,12 @@ class SettingsScreenTest {
             .use { FileInputStream(it.fileDescriptor).readBytes() }
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
     }
-    private fun click(view: View, text: String) = descendants(view).filterIsInstance<Button>()
-        .first { it.text.toString() == text }.performClick()
+    private fun click(view: View, text: String) = buttons(view, text).first().performClick()
+    private fun buttons(view: View, text: String) = descendants(view).filterIsInstance<Button>()
+        .filter { it.text.toString() == text }
+    private fun header(view: View, name: String): View = descendants(view).filterIsInstance<TextView>()
+        .first { it !is Button && it.text.toString() == name }.parent as View
+    private fun open(view: View, name: String) = header(view, name).performClick()
     private fun assertLabel(view: View, text: String) = assertTrue(text,
         descendants(view).filterIsInstance<TextView>().any { it.text.toString() == text })
     private fun descendants(view: View): List<View> = listOf(view) +
