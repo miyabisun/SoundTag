@@ -72,8 +72,10 @@ adb -s DEVICE_SERIAL shell am start -n dev.miyabisun.soundtag/.MainActivity
 JVMテストはURI解析、機器の許可、接続順序、取消し、タイムアウト、NDEF生成をfakeで検証します。
 Android instrumentationは実画面部品を操作し、Bluetoothとタグ書込みの境界をfakeに置き換えます。
 通知、別アプリ表示、書込みの失敗・再試行、設定画面の明暗・長名・スクロールを扱います。
-ウィジェットの試験は、ランチャーの追加確認を自動で承認して実際のホーム画面へ配置し、
-タップでの切替・表示更新・最小サイズでのスクロールを確認します。エミュレータはPixel Launcherを使ってください。
+ウィジェットの試験は実際のホーム画面へ1×1のウィジェットを置きます。設定画面の「Widget登録」からの追加と、
+ランチャーのウィジェット一覧からの追加・対象選択・取消し、長押しの「Settings」による再設定を自動で操作し、
+タップでの切替・表示更新、操作できない対象と未設定の表示・遷移を確認します。
+ランチャーの表示言語に依存するため、エミュレータは英語表示のPixel Launcherを使ってください。
 
 ```sh
 sdkmanager 'emulator' 'system-images;android-37.0;google_apis;x86_64'

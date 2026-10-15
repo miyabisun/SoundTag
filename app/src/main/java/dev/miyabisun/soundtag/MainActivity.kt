@@ -15,6 +15,10 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ImageSpan
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
@@ -216,13 +220,17 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(dp(40), dp(40)))
         panel.addView(header, LinearLayout.LayoutParams(-1, -2))
         if (open) {
-            setup?.let { panel.addView(it(), LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.END; marginEnd = dp(8) }) }
-            if (writable) writer(command, panel)
+            setup?.let { panel.addView(it(), LinearLayout.LayoutParams(-1, -2)) }
+            if (writable) writer(command, name, panel)
         }
         return panel.takeIf { open }
     }
 
     private fun allowSwitch(row: SpeakerSetting, state: SettingsSnapshot) = Switch(this).apply {
+        text = "自動操作"
+        textSize = 16f
+        setTextColor(getColor(R.color.text))
+        setPadding(dp(12), 0, dp(8), 0)
         contentDescription = "${row.speaker.name}の自動操作を許可"
         minHeight = dp(48)
         minWidth = dp(48)
@@ -277,7 +285,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun writer(command: TagCommand, panel: LinearLayout) {
+    private fun writer(command: TagCommand, name: String, panel: LinearLayout) {
         val state = writer.phase
         val text = writer.failure?.let { failure -> when (failure) {
             WriteFailure.UNAVAILABLE -> "この端末はNFCに対応していません"
@@ -289,7 +297,8 @@ class MainActivity : Activity() {
             WriteFailure.IO -> "書込みを確認できませんでした"
             WriteFailure.NOT_ALLOWED -> "機器の自動操作を許可してください"
         } } ?: when (state) {
-            WritePhase.IDLE -> "タグの内容を上書きします"
+            // Before writing the button itself says what happens, so there is no status line.
+            WritePhase.IDLE -> null
             WritePhase.WAITING -> "タグをかざしてください"
             WritePhase.WRITING -> "書込み中…"
             WritePhase.SUCCEEDED -> "書き込みました"
@@ -300,33 +309,37 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(4), dp(8), dp(8))
             panel.addView(this, LinearLayout.LayoutParams(-1, -2))
         }
-        val status = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            body.addView(this, LinearLayout.LayoutParams(-1, -2))
+        if (text != null) {
+            val status = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                body.addView(this, LinearLayout.LayoutParams(-1, -2))
+            }
+            status.addView(ImageView(this).apply {
+                setImageResource(when (state) {
+                    WritePhase.SUCCEEDED -> R.drawable.ic_success
+                    WritePhase.FAILED -> R.drawable.ic_error
+                    else -> R.drawable.ic_tag
+                })
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(40), dp(40)))
+            status.addView(TextView(this).apply {
+                this.text = text
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(getColor(if (state == WritePhase.FAILED) R.color.danger else R.color.text))
+                setPadding(dp(12), dp(8), 0, dp(8))
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            }, LinearLayout.LayoutParams(0, -2, 1f))
         }
-        status.addView(ImageView(this).apply {
-            setImageResource(when (state) {
-                WritePhase.SUCCEEDED -> R.drawable.ic_success
-                WritePhase.FAILED -> R.drawable.ic_error
-                else -> R.drawable.ic_tag
-            })
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(40), dp(40)))
-        status.addView(TextView(this).apply {
-            this.text = text
-            textSize = 18f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(getColor(if (state == WritePhase.FAILED) R.color.danger else R.color.text))
-            setPadding(dp(12), dp(8), 0, dp(8))
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        }, LinearLayout.LayoutParams(0, -2, 1f))
         when (state) {
             WritePhase.IDLE, WritePhase.FAILED -> {
-                if (state == WritePhase.FAILED) label("タグの内容を上書きします", parent = body)
-                button(if (state == WritePhase.IDLE) "タグに書き込む" else "もう一度書き込む", primary = true, parent = body) {
+                button(tagged("NFCタグに上書き"), "NFCタグに上書き", primary = true, parent = body) {
                     message = ""
                     writer.start(command)
+                }
+                if (SpeakerWidget.canPin(this)) {
+                    button("Widget登録", parent = body) { SpeakerWidget.pin(this, command, name) }
                 }
                 if (writer.failure == WriteFailure.DISABLED) {
                     button("NFCを開く", parent = body) { startActivity(Intent(Settings.ACTION_NFC_SETTINGS)) }
@@ -397,7 +410,18 @@ class MainActivity : Activity() {
         setPadding(0, dp(8), 0, dp(8))
         parent.addView(this)
     }
-    private fun button(value: String, description: String = value, primary: Boolean = false,
+    /** The label led by the tag icon, kept next to the centred text at any font scale. */
+    private fun tagged(value: String): CharSequence {
+        val size = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, resources.displayMetrics).toInt()
+        val icon = getDrawable(R.drawable.ic_tag)!!.mutate().apply {
+            setTint(getColor(R.color.on_accent))
+            setBounds(0, 0, size, size)
+        }
+        return SpannableStringBuilder("\uFFFC  $value").apply {
+            setSpan(ImageSpan(icon, ImageSpan.ALIGN_CENTER), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
+    private fun button(value: CharSequence, description: CharSequence = value, primary: Boolean = false,
                        parent: LinearLayout = content, action: () -> Unit): Button = Button(this).apply {
         text = value
         textSize = 16f

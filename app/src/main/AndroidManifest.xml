@@ -37,6 +37,13 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/speaker_widget" />
         </receiver>
+        <receiver android:name=".WidgetPinned" android:exported="false" />
+        <activity android:name=".WidgetConfigActivity" android:exported="true"
+            android:taskAffinity="" android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
         <service android:name=".NfcService" android:exported="false"
             android:foregroundServiceType="connectedDevice" />
         <service android:name=".YouTubeAccessService" android:exported="true"

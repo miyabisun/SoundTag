@@ -1,4 +1,8 @@
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="@color/background" />
-    <corners android:radius="@android:dimen/system_app_widget_background_radius" />
-</shape>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/border">
+    <item>
+        <shape>
+            <solid android:color="@color/background" />
+            <corners android:radius="@android:dimen/system_app_widget_background_radius" />
+        </shape>
+    </item>
+</ripple>

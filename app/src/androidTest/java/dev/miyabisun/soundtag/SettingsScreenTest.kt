@@ -46,18 +46,21 @@ class SettingsScreenTest {
                     assertFalse(header(root, "全て切断").isEnabled)
                     assertTrue(descendants(root).filterIsInstance<Switch>().isEmpty())
                     open(root, "デスクのスピーカー")
-                    assertTrue("Not allowed: no writer", buttons(root, "タグに書き込む").isEmpty())
+                    assertTrue("Not allowed: no writer", buttons(root, "NFCタグに上書き").isEmpty())
+                    assertTrue("Not allowed: no widget", buttons(root, "Widget登録").isEmpty())
                     descendants(root).filterIsInstance<Switch>().single().performClick()
                     assertEquals(setOf(address), fake.saved)
-                    assertLabel(root, "タグの内容を上書きします")
+                    assertFalse(descendants(root).filterIsInstance<TextView>().any { it.text.toString() == "タグの内容を上書きします" })
+                    assertEquals("Switch says what it allows", "自動操作", descendants(root).filterIsInstance<Switch>().single().text)
+                    assertEquals(1, buttons(root, "Widget登録").size)
                     assertTrue(nfc.messages.isEmpty())
                     assertTrue(bluetooth.calls.isEmpty())
                     open(root, "全て切断")
-                    assertEquals("Only one card is open", 1, buttons(root, "タグに書き込む").size)
+                    assertEquals("Only one card is open", 1, buttons(root, "NFCタグに上書き").size)
                     assertEquals("開いています", header(root, "全て切断").stateDescription)
                     assertEquals("閉じています", header(root, "デスクのスピーカー").stateDescription)
                     open(root, "デスクのスピーカー")
-                    click(root, "タグに書き込む")
+                    click(root, "NFCタグに上書き")
                     assertLabel(root, "タグをかざしてください")
                 }
                 screenshot("writer-waiting")
@@ -75,7 +78,7 @@ class SettingsScreenTest {
                     click(root, "閉じる")
                     assertTrue(buttons(root, "閉じる").isEmpty())
                     open(root, "全て切断")
-                    click(root, "タグに書き込む")
+                    click(root, "NFCタグに上書き")
                     nfc.detected()
                     nfc.complete(WriteFailure.READ_ONLY)
                     assertLabel(root, "このタグは書込みできません")
@@ -83,7 +86,7 @@ class SettingsScreenTest {
                 screenshot("writer-failure")
                 screen.onActivity { activity ->
                     val root = activity.window.decorView
-                    click(root, "もう一度書き込む")
+                    click(root, "NFCタグに上書き")
                     nfc.detected()
                     nfc.complete(null)
                     assertLabel(root, "書き込みました")
@@ -111,13 +114,13 @@ class SettingsScreenTest {
                 screen.onActivity { activity ->
                     val root = activity.window.decorView
                     open(root, "デスクのスピーカー")
-                    click(root, "タグに書き込む")
+                    click(root, "NFCタグに上書き")
                     val old = nfc.detected
                     descendants(root).filterIsInstance<Switch>().single().performClick()
                     assertTrue(fake.saved.isEmpty())
                     old()
                     assertEquals(3, nfc.messages.size)
-                    assertTrue(buttons(activity.window.decorView, "タグに書き込む").isEmpty())
+                    assertTrue(buttons(activity.window.decorView, "NFCタグに上書き").isEmpty())
                     assertEquals(1, descendants(activity.window.decorView).filterIsInstance<Switch>().size)
                     assertLabel(activity.window.decorView, "許可を解除しました")
                 }
@@ -138,16 +141,16 @@ class SettingsScreenTest {
             ActivityScenario.launch(MainActivity::class.java).use { screen ->
                 screen.onActivity { activity ->
                     open(activity.window.decorView, "全て切断")
-                    click(activity.window.decorView, "タグに書き込む")
+                    click(activity.window.decorView, "NFCタグに上書き")
                 }
                 val old = nfc.detected
                 screen.recreate()
                 screen.onActivity { activity ->
                     old()
                     assertTrue(nfc.messages.isEmpty())
-                    assertLabel(activity.window.decorView, "タグに書き込む")
+                    assertEquals(1, buttons(activity.window.decorView, "NFCタグに上書き").size)
                     nfc.startFailure = WriteFailure.DISABLED
-                    click(activity.window.decorView, "タグに書き込む")
+                    click(activity.window.decorView, "NFCタグに上書き")
                     assertLabel(activity.window.decorView, "NFCがOFFです")
                     assertLabel(activity.window.decorView, "NFCを開く")
                 }
@@ -188,7 +191,7 @@ class SettingsScreenTest {
                     capture(screen, "settings-$mode")
                     screen.onActivity { activity -> open(activity.window.decorView, "デスクのスピーカー") }
                     capture(screen, "preview-$mode")
-                    screen.onActivity { activity -> click(activity.window.decorView, "タグに書き込む") }
+                    screen.onActivity { activity -> click(activity.window.decorView, "NFCタグに上書き") }
                     capture(screen, "waiting-$mode")
                     screen.onActivity { activity ->
                         nfc.detected()
@@ -196,14 +199,14 @@ class SettingsScreenTest {
                     }
                     capture(screen, "failure-$mode")
                     screen.onActivity { activity ->
-                        click(activity.window.decorView, "もう一度書き込む")
+                        click(activity.window.decorView, "NFCタグに上書き")
                         nfc.detected()
                         nfc.complete(null)
                     }
                     capture(screen, "success-$mode")
                     screen.onActivity { activity ->
                         click(activity.window.decorView, "閉じる")
-                        assertTrue(buttons(activity.window.decorView, "タグに書き込む").isEmpty())
+                        assertTrue(buttons(activity.window.decorView, "NFCタグに上書き").isEmpty())
                     }
                 }
             }
@@ -224,10 +227,10 @@ class SettingsScreenTest {
                     val root = activity.window.decorView
                     assertEquals(position, descendants(root).filterIsInstance<ScrollView>().single().scrollY)
                     open(root, "全て切断")
-                    click(root, "タグに書き込む")
+                    click(root, "NFCタグに上書き")
                     click(root, "中止")
-                    assertLabel(root, "タグに書き込む")
-                    click(root, "タグに書き込む")
+                    assertEquals(1, buttons(root, "NFCタグに上書き").size)
+                    click(root, "NFCタグに上書き")
                 }
                 var old = nfc.detected
                 shell("input keyevent KEYCODE_BACK")
@@ -237,7 +240,7 @@ class SettingsScreenTest {
                     assertTrue(buttons(activity.window.decorView, "中止").isEmpty())
                     assertEquals("閉じています", header(activity.window.decorView, "全て切断").stateDescription)
                     open(activity.window.decorView, "全て切断")
-                    click(activity.window.decorView, "タグに書き込む")
+                    click(activity.window.decorView, "NFCタグに上書き")
                     old = nfc.detected
                     nfc.detected()
                     open(activity.window.decorView, "全て切断")
@@ -345,8 +348,9 @@ class SettingsScreenTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
     }
     private fun click(view: View, text: String) = buttons(view, text).first().performClick()
+    // Matched by description: the write button's text leads with an icon placeholder.
     private fun buttons(view: View, text: String) = descendants(view).filterIsInstance<Button>()
-        .filter { it.text.toString() == text }
+        .filter { it.contentDescription?.toString() == text }
     private fun header(view: View, name: String): View = descendants(view).filterIsInstance<TextView>()
         .first { it !is Button && it.text.toString() == name }.parent as View
     private fun open(view: View, name: String) = header(view, name).performClick()
